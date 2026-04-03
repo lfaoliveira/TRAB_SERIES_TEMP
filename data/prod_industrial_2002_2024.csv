@@ -1,6 +1,4 @@
-﻿"Tabela 8888 - Produção Física Industrial, por seções e atividades industriais"
-"Mês","","Variável","Seções e atividades industriais (CNAE 2.0)"
-"Mês","","Variável","1 Indústria geral","2 Indústrias extrativas","3 Indústrias de transformação"
+﻿"Mês","Região","Variável","Indústria geral","Indústrias extrativas","Indústrias de transformação"
 "janeiro 2002","Brasil","PIMPF - Número-índice (2022=100) (Número-índice)","84.35985","72.33534","85.14812"
 "janeiro 2002","Brasil","PIMPF - Número-índice com ajuste sazonal (2022=100) (Número-índice)","90.77187","74.88232","91.81563"
 "janeiro 2002","Brasil","PIMPF - Variação mês/mês imediatamente anterior, com ajuste sazonal (M/M-1) (%)","0.0","0.0","0.0"
@@ -1657,22 +1655,3 @@
 "dezembro 2024","Brasil","PIMPF - Variação mês/mesmo mês do ano anterior (M/M-12) (%)","1.4","-7.0","3.3"
 "dezembro 2024","Brasil","PIMPF - Variação acumulada no ano (em relação ao mesmo período do ano anterior) (%)","3.1","0.0","3.7"
 "dezembro 2024","Brasil","PIMPF - Variação acumulada em 12 meses (em relação ao período anterior de 12 meses) (%)","3.1","0.0","3.7"
-"Fonte: IBGE - Pesquisa Industrial Mensal - Produção Física"
-
-""
-"Legenda"
-"Símbolo","Significado"
-"-","Zero absoluto, não resultante de um cálculo ou arredondamento.
-Ex: Em determinado município não existem pessoas de 14 anos de idade sem instrução."
-"0","Zero resultante de um cálculo ou arredondamento.
-Ex: A inflação do feijão em determinada Região Metropolitana foi 0.
-Determinado município produziu 400 kg de sementes de girassol e os dados da tabela são expressos em toneladas."
-"X","Valor inibido para não identificar o informante.
-Ex: Determinado município só possui uma empresa produtora de cimento, logo o valor de sua produção deve ser inibido."
-"..","Valor não se aplica.
-Ex: Não se pode obter o total da produção agrícola em determinado município quando os produtos agrícolas são contabilizados com unidades de medida distintas."
-"...","Valor não disponível.
-Ex: A produção de feijão em determinado município não foi pesquisada ou determinado município não existia no ano da pesquisa."
-"A a Z
-(exceto X)","Significa uma faixa de valores. Varia em função da tabela (se for o caso).
-Ex: O nível de precisão da produção estimada de combustíveis está na faixa A (95 a 100%)"

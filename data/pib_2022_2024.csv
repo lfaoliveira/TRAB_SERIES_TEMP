@@ -1,6 +1,4 @@
-﻿"Tabela 5932 - Taxa de variação do índice de volume trimestral"
-"Variável - Taxa trimestral (em relação ao mesmo período do ano anterior) (%)"
-"Trimestre","","Setores e subsetores",""
+﻿"Trimestre","Região","Setores e subsetores","Valor"
 "1º trimestre 2002","Brasil","Agropecuária - total","4.7"
 "1º trimestre 2002","Brasil","Indústria - total","-2.3"
 "1º trimestre 2002","Brasil","Indústrias extrativas","13.9"
@@ -1565,11 +1563,6 @@
 "4º trimestre 2024","Brasil","Valor adicionado a preços básicos","3.2"
 "4º trimestre 2024","Brasil","Impostos líquidos sobre produtos","6.2"
 "4º trimestre 2024","Brasil","PIB a preços de mercado","3.6"
-"Fonte: IBGE - Contas Nacionais Trimestrais"
-
-"Tabela 5932 - Taxa de variação do índice de volume trimestral"
-"Variável - Taxa acumulada em quatro trimestres (em relação ao mesmo período do ano anterior) (%)"
-"Trimestre","","Setores e subsetores",""
 "1º trimestre 2002","Brasil","Agropecuária - total","5.7"
 "1º trimestre 2002","Brasil","Indústria - total","-2.1"
 "1º trimestre 2002","Brasil","Indústrias extrativas","6.7"
@@ -3134,11 +3127,6 @@
 "4º trimestre 2024","Brasil","Valor adicionado a preços básicos","3.1"
 "4º trimestre 2024","Brasil","Impostos líquidos sobre produtos","5.7"
 "4º trimestre 2024","Brasil","PIB a preços de mercado","3.4"
-"Fonte: IBGE - Contas Nacionais Trimestrais"
-
-"Tabela 5932 - Taxa de variação do índice de volume trimestral"
-"Variável - Taxa acumulada ao longo do ano (em relação ao mesmo período do ano anterior) (%)"
-"Trimestre","","Setores e subsetores",""
 "1º trimestre 2002","Brasil","Agropecuária - total","4.7"
 "1º trimestre 2002","Brasil","Indústria - total","-2.3"
 "1º trimestre 2002","Brasil","Indústrias extrativas","13.9"
@@ -4703,11 +4691,6 @@
 "4º trimestre 2024","Brasil","Valor adicionado a preços básicos","3.1"
 "4º trimestre 2024","Brasil","Impostos líquidos sobre produtos","5.7"
 "4º trimestre 2024","Brasil","PIB a preços de mercado","3.4"
-"Fonte: IBGE - Contas Nacionais Trimestrais"
-
-"Tabela 5932 - Taxa de variação do índice de volume trimestral"
-"Variável - Taxa trimestre contra trimestre imediatamente anterior (%)"
-"Trimestre","","Setores e subsetores",""
 "1º trimestre 2002","Brasil","Agropecuária - total","-2.9"
 "1º trimestre 2002","Brasil","Indústria - total","4.1"
 "1º trimestre 2002","Brasil","Indústrias extrativas","7.8"
@@ -6272,22 +6255,3 @@
 "4º trimestre 2024","Brasil","Valor adicionado a preços básicos","-0.1"
 "4º trimestre 2024","Brasil","Impostos líquidos sobre produtos","-"
 "4º trimestre 2024","Brasil","PIB a preços de mercado","0.0"
-"Fonte: IBGE - Contas Nacionais Trimestrais"
-
-""
-"Legenda"
-"Símbolo","Significado"
-"-","Zero absoluto, não resultante de um cálculo ou arredondamento.
-Ex: Em determinado município não existem pessoas de 14 anos de idade sem instrução."
-"0","Zero resultante de um cálculo ou arredondamento.
-Ex: A inflação do feijão em determinada Região Metropolitana foi 0.
-Determinado município produziu 400 kg de sementes de girassol e os dados da tabela são expressos em toneladas."
-"X","Valor inibido para não identificar o informante.
-Ex: Determinado município só possui uma empresa produtora de cimento, logo o valor de sua produção deve ser inibido."
-"..","Valor não se aplica.
-Ex: Não se pode obter o total da produção agrícola em determinado município quando os produtos agrícolas são contabilizados com unidades de medida distintas."
-"...","Valor não disponível.
-Ex: A produção de feijão em determinado município não foi pesquisada ou determinado município não existia no ano da pesquisa."
-"A a Z
-(exceto X)","Significa uma faixa de valores. Varia em função da tabela (se for o caso).
-Ex: O nível de precisão da produção estimada de combustíveis está na faixa A (95 a 100%)"
