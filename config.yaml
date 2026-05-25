@@ -1,1 +1,7 @@
 train: false
+#----
+# opcoes:
+# prototype: roda com dataset reduzido,
+# train,
+# hyperot: optimizacao de hyperparametros,
+run_mode: prototype
