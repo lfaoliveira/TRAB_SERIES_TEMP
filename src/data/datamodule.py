@@ -1,5 +1,5 @@
 from lightning.pytorch.core.datamodule import LightningDataModule
-from DataProcesser.dataset import StrokeDataset
+from data.dataset import StrokeDataset
 from torch.utils.data import DataLoader, random_split, WeightedRandomSampler
 import numpy as np
 
