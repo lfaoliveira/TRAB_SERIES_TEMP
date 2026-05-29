@@ -1,7 +1,5 @@
-train: false
-#----
-# opcoes:
-# prototype: roda com dataset reduzido,
-# train,
-# hyperot: optimizacao de hyperparametros,
+#----- PROJECT CONFIGURATIONS ------#
+#----- VER src/config/config.py para ver valores válidos------#
 run_mode: prototype
+
+dataset_frequency: "Daily"
