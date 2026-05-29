@@ -1,55 +1,57 @@
-from enum import StrEnum
 import os
+from pathlib import Path
+from typing import Literal
 import numpy as np
+
+import kagglehub
 import pandas as pd
-from torch.utils.data import Dataset
-import pandera.pandas as pa
-from pandera.typing import DataFrame, Series, Index
+from pandera.typing import DataFrame
 from sklearn.preprocessing import StandardScaler
-from torch.types import Tensor
-from kagglehub import KaggleDatasetAdapter, dataset_download, dataset_load
 from torch import from_numpy
+from torch.types import Tensor
+from torch.utils.data import Dataset
+
+from src.config.config import CentralConfig
 
 
-class CATEGORICAL_COLUMNS(StrEnum):
-    GENDER = "gender"
-    MARRIED = "ever_married"
-    WORK = "work_type"
-    RESIDENCE = "Residence_type"
-    SMOKE_STATUS = "smoking_status"
-
-
-class MySchema(pa.DataFrameModel):
-    id: Index[int]
-    age: Series[float]
-    gender: Series[str]
-    ever_married: Series[str]
-    work_type: Series[str]
-    Residence_type: Series[str]
-    smoking_status: Series[str]
-    hypertension: Series[int]
-    heart_disease: Series[int]
-    avg_glucose_level: Series[float]
-    bmi: Series[float]
-    stroke: Series[int]
-    # pred: Optional[Series[int]]
-    # error: Optional[Series[str]]
+class Horizons:
+    HORIZON = {
+        # Output width of model (specified by m4 competition)
+        "Yearly": 6,
+        "Quarterly": 8,
+        "Monthly": 18,
+        "Daily": 14,
+        "Hourly": 48,
+    }
+    INPUT_WIDTH = {
+        # Input width of model (adjust as needed. Taking seasonality into
+        # account could be a good approach.)
+        "Yearly": 8,
+        "Quarterly": 10,
+        "Monthly": 28,
+        "Daily": 18,
+        "Hourly": 16,
+    }
 
 
 class StrokeDataset(Dataset):
-    original_df: DataFrame[MySchema]
-    dataframe: DataFrame[MySchema]
+    original_df: DataFrame
+    dataframe: DataFrame
     data: Tensor
     labels: Tensor
     LABELS_COLUMN: str
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        PATH_FONTE_DADOS: Path = Path("data/m4"),
+    ) -> None:
         super().__init__()
 
-        self.read_df()
-        STR_COL = list(CATEGORICAL_COLUMNS)
-        self.LABELS_COLUMN = "stroke"
-        self.data_prep(STR_COL)
+        self.PATH_FONTE_DADOS = PATH_FONTE_DADOS
+        self.PATH_FONTE_DADOS.mkdir(exist_ok=True)
+        self.frequency = CentralConfig.dataset_frequency
+        self.df_train, self.df_test = self.load_dataset()
+        self.data_prep()
 
     def __getitem__(self, index: Tensor | list[int] | int):
         return self.data[index], self.labels[index]
@@ -57,131 +59,121 @@ class StrokeDataset(Dataset):
     def __len__(self):
         return len(self.data)
 
-    def read_df(self):
-        local_filename = "stroke.csv"
-        if not os.path.exists(local_filename):
-            dataset_name = "fedesoriano/stroke-prediction-dataset"
-            dataset_download(dataset_name)
-            # Set the path to the file you'd like to load
-            dataset_path = "healthcare-dataset-stroke-data.csv"
+    def load_dataset(self, verbose=False) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Carrega dataset do Kaggle, salva em Parquet.
 
-            df = dataset_load(
-                KaggleDatasetAdapter.PANDAS,
-                dataset_name,
-                dataset_path,
-            )
-            df.to_csv(local_filename, sep=",")
+        Args:
+            path_dados: Caminho para armazenar dados
+            usar_parquet: Se True, tenta ler de Parquet primeiro
+
+        Returns:
+            DataFrame pré-processado
+        """
+
+        dataset_train = self.PATH_FONTE_DADOS / f"{self.frequency}-train.parquet"
+        dataset_test = self.PATH_FONTE_DADOS / f"{self.frequency}-test.parquet"
+
+        # Carregar dados se existir
+        if dataset_train.exists():
+            print(
+                f"Lendo dataset a partir de Parquet: {dataset_train}"
+            ) if verbose else None
+
+            df_train = pd.read_parquet(dataset_train, engine="auto")
+            df_test = pd.read_parquet(dataset_test, engine="auto")
         else:
-            df = pd.read_csv(local_filename)
+            # baixar do Kaggle
+            print(
+                f"Baixando dataset  M4 todo via Kagglehub em {self.PATH_FONTE_DADOS}"
+            ) if verbose else None
+            kagglehub.dataset_download(
+                "yogesh94/m4-forecasting-competition-dataset",
+                output_dir=str(self.PATH_FONTE_DADOS),
+            )
 
-        # remove null values to avoid problems
-        df = (
-            df.dropna()
-            .set_index("id")
-            .drop(columns=["Unnamed: 0"], errors="ignore")
-            .sort_index()
-        )
-        # validate schema
-        self.dataframe = MySchema.validate(df)
-        self.original_df = MySchema.validate(df)
+            file_csv = str(dataset_train).replace("parquet", "csv")
+            df_train = pd.read_csv(file_csv, header="infer", index_col=0)
+            df_test = pd.read_csv(file_csv, header="infer", index_col=0)
 
-    def data_prep(self, bad_columns: list[CATEGORICAL_COLUMNS]) -> None:
+            try:
+                df_train.to_parquet(
+                    dataset_train, compression="gzip", engine="auto", index=True
+                )
+                df_test.to_parquet(
+                    dataset_test, compression="gzip", engine="auto", index=True
+                )
+
+                print(
+                    f"Dataset salvo com sucesso em: {dataset_train} e {dataset_test}"
+                ) if verbose else None
+
+            except Exception as e:
+                print(f"Falha ao salvar Parquet: {e}")
+
+        # Pré-processamento: remover NaN
+        df_train = df_train.dropna()
+        df_test = df_test.dropna()
+
+        print(f"Dataset final: {df_train.shape}") if verbose else None
+        print(f"Dataset final: {df_test.shape}") if verbose else None
+
+        return df_train, df_test
+
+    def data_prep(
+        self,
+        df: DataFrame | None = None,
+        imputation: Literal["mean", "repeat", "interpolate"] | None = None,
+    ) -> None:
         """
         function for data normalization
 
-        :param self: Description
-        :param bad_columns: columns to be normalized (transforms categorical columns into normalized numeric values)
-        :type bad_columns: list[CATEGORICAL_COLUMNS]
+        :param self: imputa dados faltantes (ou apenas dropa eles), normaliza dados
+
         """
-        STR_COL = bad_columns
 
-        # iterate over the column set and assign categorical number for each categorical column
-        for col in STR_COL:
-            self.dataframe[col] = self.dataframe[f"{col}"].astype("category")
-            self.dataframe[f"{col}_code"] = self.dataframe[f"{col}"].cat.codes
+        # usar df fornecido ou o de treino como padrão
+        if df is None:
+            df = self.df_train
 
-        self.dataframe = self.dataframe.drop(columns=STR_COL)
-        # labels before normalization (doesnt need to be normalized)
-        self.labels = from_numpy(
-            self.dataframe.loc[:, self.LABELS_COLUMN].values
-        ).float()
-        self.dataframe = self.dataframe.drop(columns=self.LABELS_COLUMN)
+        # garantir numérico (força NaN se não for conversível)
+        df = df.apply(pd.to_numeric, errors="coerce")
 
-        # standard scaler to normalize dataframe to mean 0 and standard deviation 1
-        scaler = StandardScaler()
-        scaled_values = scaler.fit_transform(self.dataframe)
-        self.dataframe = DataFrame(
-            scaled_values, columns=self.dataframe.columns, index=self.dataframe.index
-        )
-        self.data = from_numpy(self.dataframe.values).float()
+        # imputação por série (coluna)
+        if imputation == "mean":
+            df = df.apply(lambda col: col.fillna(col.mean()), axis=0)
+        elif imputation == "repeat":
+            df = df.apply(
+                lambda col: col.fillna(method="ffill").fillna(method="bfill"), axis=0
+            )
+        elif imputation == "interpolate":
+            df = df.apply(
+                lambda row: (
+                    row.interpolate().fillna(method="bfill").fillna(method="ffill")
+                ),
+                axis=0,
+            )
+        elif imputation is None:
+            df = df.dropna(axis=1, how="any")
 
-        print("\n")
-        print(f"DATASET:\n{self.dataframe.head()}\n")
+        # converter para numpy array (n_series, timesteps)
+        values = df.to_numpy(dtype=float)
 
+        # normalizar por série (zero mean, unit std) usando StandardScaler
+        # aplicamos StandardScaler em cada série (linha) individualmente
+        # aplicar StandardScaler em cada série (linha) individualmente
+        scaled_rows = [
+            StandardScaler().fit_transform(row.reshape(-1, 1)).ravel() for row in values
+        ]
+        scaled = np.vstack(scaled_rows)
 
-class ErrorModelDataset(Dataset):
-    original_df: DataFrame[MySchema]
-    dataframe: DataFrame[MySchema]
-    data: np.typing.NDArray
-    labels: np.typing.NDArray
+        # definir horizon (últimos valores como labels) baseado na frequência
 
-    def __init__(self, predictions_df: pd.DataFrame) -> None:
-        super().__init__()
+        freq_key = str(self.frequency)
+        horizon = Horizons.HORIZON.get(freq_key, 1)
 
-        self.OBJECTIVE_COL = "error"
-        self.LABELS_COLUMN = "stroke"
-        self.clean_df(predictions_df)
-        STR_COL = list(CATEGORICAL_COLUMNS)
-        self.data_prep(STR_COL)
+        labels = values[:, -horizon:]
 
-    def __getitem__(self, index: Tensor | list[int] | int):
-        return self.data[index], self.labels[index]
-
-    def __len__(self):
-        return len(self.data)
-
-    def clean_df(self, df: pd.DataFrame):
-
-        # validate schema
-        self.dataframe = MySchema.validate(df)
-        self.original_df = MySchema.validate(df)
-
-        if self.OBJECTIVE_COL not in self.original_df.columns:
-            raise ValueError("SEM COLUNA OBJETIVO")
-
-    def data_prep(self, bad_columns: list) -> None:
-        """
-        Optimized for Random Forest: Handles categorical encoding
-        without unnecessary scaling.
-        """
-        # 1. Convert categorical columns to numeric codes
-        # We use OrdinalEncoder or .cat.codes as RF handles integers well
-        for col in bad_columns:
-            self.dataframe[col] = self.dataframe[col].astype("category")
-            self.dataframe[f"{col}_code"] = self.dataframe[col].cat.codes
-
-        # 2. Extract Labels before dropping columns
-        # Ensure labels are numeric (LabelEncode them if they are strings)
-        self.labels = np.asarray(
-            self.dataframe[self.OBJECTIVE_COL].values, dtype=np.dtype("U2")
-        )
-
-        # 3. Clean up the dataframe
-        # Drop original string columns and the objective column
-        drop_list = bad_columns + [self.OBJECTIVE_COL]
-        # Note: Adding a check to avoid errors if LABELS_COLUMN is already in drop_list
-        if (
-            hasattr(self, "LABELS_COLUMN")
-            and self.LABELS_COLUMN in self.dataframe.columns
-        ):
-            # drop_list.append(self.LABELS_COLUMN)
-            pass
-
-        self.dataframe = self.dataframe.drop(columns=drop_list)
-
-        # 4. Prepare final data
-        # For RF, we usually keep it as a NumPy array or Pandas DataFrame
-        self.data = self.dataframe.values
-
-        print("\n")
-        print(f"RANDOM FOREST READY DATASET:\n{self.dataframe.head()}\n")
+        # converter para tensores do PyTorch
+        self.data = from_numpy(scaled).float()
+        self.labels = from_numpy(np.asarray(labels, dtype=np.float32)).float()
