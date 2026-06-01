@@ -42,7 +42,8 @@ def load_config(path: Optional[Path] = None) -> CentralConfig:
 
 # Instância carregada ao importar o módulo
 try:
-    settings: CentralConfig = load_config()
+    ProjectSettings: CentralConfig = load_config()
+    print(ProjectSettings)
 except ValidationError as e:
     # O Pydantic lança ValidationError com detalhes amigáveis do que falhou
     raise RuntimeError(f"Falha na validação das configurações:\n{e}") from e

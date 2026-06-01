@@ -10,7 +10,6 @@ class StrokeDataModule(LightningDataModule):
 
         self.BATCH_SIZE = BATCH_SIZE
         self.WORKERS = WORKERS
-        self.input_dims = None
 
     # preparacao dos dados
     def prepare_data(self):
@@ -19,10 +18,6 @@ class StrokeDataModule(LightningDataModule):
 
     # setup for transformation and augmentation
     def setup(self, stage=None):
-        # Obter dimensões de entrada
-        data, label = self.dataset[0]
-        self.input_dims = data.shape[0]
-
         # Criar TensorDatasets para treino e teste
         dataset_train = TensorDataset(
             self.dataset.data_train, self.dataset.labels_train

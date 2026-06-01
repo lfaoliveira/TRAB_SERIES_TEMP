@@ -11,7 +11,7 @@ from torch import from_numpy
 from torch.types import Tensor
 from torch.utils.data import Dataset
 
-from src.config.config import CentralConfig
+from src.config.config import ProjectSettings
 
 
 class Horizons:
@@ -37,40 +37,34 @@ class Horizons:
 class StrokeDataset(Dataset):
     original_df: DataFrame
     dataframe: DataFrame
-    data: Tensor
-    labels: Tensor
+    data_train: Tensor
+    labels_train: Tensor
+
+    data_test: Tensor
+    labels_test: Tensor
     LABELS_COLUMN: str
 
     def __init__(
         self,
-        PATH_FONTE_DADOS: Path = Path("data/m4"),
+        PATH_FONTE_DADOS: Path = Path("/data/m4"),
     ) -> None:
         super().__init__()
 
         self.PATH_FONTE_DADOS = PATH_FONTE_DADOS
         self.PATH_FONTE_DADOS.mkdir(exist_ok=True)
-        self.frequency = CentralConfig.dataset_frequency
+        self.frequency = ProjectSettings.dataset_frequency
         df_train, df_test = self.load_dataset()
 
         # Preparar tensores para treino e teste
-        data_train, label_train = self.data_prep(df_train)
-        data_test, label_test = self.data_prep(df_test)
+        data_train, label_train = self.data_prep(df_train, imputation=None)
+        data_test, label_test = self.data_prep(df_test, imputation=None)
 
         # Armazenar tensores como atributos da instância
         self.data_train = data_train
         self.labels_train = label_train
-        # Manter também versões de teste separadas, se necessário
+        # Manter também versões de teste separadas
         self.data_test = data_test
         self.labels_test = label_test
-        # self.data/self.labels para __getitem__ (uso em treino)
-        self.data = data_train
-        self.labels = label_train
-
-    def __getitem__(self, index: Tensor | int):
-        return self.data[index], self.labels[index]
-
-    def __len__(self):
-        return len(self.data)
 
     def load_dataset(self, verbose=False) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
@@ -107,7 +101,8 @@ class StrokeDataset(Dataset):
 
             file_csv = str(dataset_train).replace("parquet", "csv")
             df_train = pd.read_csv(file_csv, header="infer", index_col=0)
-            df_test = pd.read_csv(file_csv, header="infer", index_col=0)
+            file_csv_test = str(dataset_test).replace("parquet", "csv")
+            df_test = pd.read_csv(file_csv_test, header="infer", index_col=0)
 
             try:
                 df_train.to_parquet(
@@ -163,12 +158,14 @@ class StrokeDataset(Dataset):
                 axis=0,
             )
         elif imputation is None:
+            # TODO ADICIONAR THRESHOLD PARA DROPNA
             df = df.dropna(axis=1, how="any")
         else:
             raise ValueError("")
 
         # converter para numpy array (n_series, timesteps)
         values = df.to_numpy(dtype=float)
+        print(f"VALUES: {values.shape}")
 
         # normalizar por série (zero mean, unit std) usando StandardScaler
         # aplicamos StandardScaler em cada série (linha) individualmente
@@ -178,7 +175,6 @@ class StrokeDataset(Dataset):
         scaled = np.vstack(scaled_rows)
 
         # definir horizon (últimos valores como labels) baseado na frequência
-
         freq_key = str(self.frequency)
         horizon = Horizons.HORIZON.get(freq_key, 1)
 
