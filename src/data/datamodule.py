@@ -1,11 +1,11 @@
 from lightning.pytorch.core.datamodule import LightningDataModule
-from data.dataset import StrokeDataset
-from torch.utils.data import DataLoader, random_split, WeightedRandomSampler
+from src.data.dataset import StrokeDataset
+from torch.utils.data import DataLoader, TensorDataset, random_split
 import numpy as np
 
 
 class StrokeDataModule(LightningDataModule):
-    def __init__(self, BATCH_SIZE: int, WORKERS: int):
+    def __init__(self, BATCH_SIZE: int | None = None, WORKERS: int = 4):
         super().__init__()
 
         self.BATCH_SIZE = BATCH_SIZE
@@ -19,37 +19,27 @@ class StrokeDataModule(LightningDataModule):
 
     # setup for transformation and augmentation
     def setup(self, stage=None):
-        DATA_SPLIT = [0.7, 0.3]
-
+        # Obter dimensões de entrada
         data, label = self.dataset[0]
         self.input_dims = data.shape[0]
-        self.stroke_train, self.stroke_val = random_split(self.dataset, DATA_SPLIT)
 
-        train_labels = np.array([self.dataset[i][1] for i in self.stroke_train.indices])
-        class_counts = np.bincount(train_labels.astype(int))
-        n_classes = len(class_counts)
-        total_samples = len(train_labels)
-        class_weights = total_samples / (n_classes * class_counts)
-        self.class_weights = (
-            class_weights.tolist()
-        )  # shape [n_classes] – for loss weighting
-        # self.sample_weights = class_weights[
-        #     train_labels.astype(int)
-        # ].tolist()  # shape [n_samples] – for sampler
+        # Criar TensorDatasets para treino e teste
+        dataset_train = TensorDataset(
+            self.dataset.data_train, self.dataset.labels_train
+        )
+        dataset_test = TensorDataset(self.dataset.data_test, self.dataset.labels_test)
+
+        # Split treino em train (80%) e validação (20%)
+        train_size = int(0.8 * len(dataset_train))
+        val_size = len(dataset_train) - train_size
+        self.m4_train, self.m4_val = random_split(dataset_train, [train_size, val_size])
+        self.m4_test = dataset_test
 
     def train_dataloader(self, BATCH_SIZE: int | None = None):
         BATCH_SIZE = BATCH_SIZE if BATCH_SIZE else self.BATCH_SIZE
 
-        # -------disabling class weights on sampling to test in the loss
-        self.sample_weights = [1.0, 1.0]
-        train_sampler = WeightedRandomSampler(
-            weights=self.sample_weights,
-            num_samples=len(self.sample_weights),
-            replacement=True,
-        )
         train_loader = DataLoader(
-            self.stroke_train,
-            sampler=train_sampler,
+            self.m4_train,
             batch_size=BATCH_SIZE,
             num_workers=self.WORKERS,
             persistent_workers=True,
@@ -59,7 +49,7 @@ class StrokeDataModule(LightningDataModule):
     def val_dataloader(self, BATCH_SIZE: int | None = None):
         BATCH_SIZE = BATCH_SIZE if BATCH_SIZE else self.BATCH_SIZE
         val_loader = DataLoader(
-            self.stroke_val,
+            self.m4_val,
             batch_size=BATCH_SIZE,
             num_workers=self.WORKERS,
             persistent_workers=True,
@@ -68,12 +58,11 @@ class StrokeDataModule(LightningDataModule):
 
     def test_dataloader(self, BATCH_SIZE: int | None = None):
         """Dataloader de teste"""
-        # use passed argument, else use class value
         BATCH_SIZE = BATCH_SIZE if BATCH_SIZE else self.BATCH_SIZE
         test_loader = DataLoader(
-            self.stroke_val,
+            self.m4_test,
             batch_size=BATCH_SIZE,
             num_workers=self.WORKERS,
             persistent_workers=True,
         )
-        return test_loader, self.stroke_val
+        return test_loader

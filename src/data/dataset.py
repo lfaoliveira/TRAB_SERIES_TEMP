@@ -51,10 +51,22 @@ class StrokeDataset(Dataset):
         self.PATH_FONTE_DADOS.mkdir(exist_ok=True)
         self.frequency = CentralConfig.dataset_frequency
         df_train, df_test = self.load_dataset()
+
+        # Preparar tensores para treino e teste
         data_train, label_train = self.data_prep(df_train)
         data_test, label_test = self.data_prep(df_test)
 
-    def __getitem__(self, index: Tensor):
+        # Armazenar tensores como atributos da instância
+        self.data_train = data_train
+        self.labels_train = label_train
+        # Manter também versões de teste separadas, se necessário
+        self.data_test = data_test
+        self.labels_test = label_test
+        # self.data/self.labels para __getitem__ (uso em treino)
+        self.data = data_train
+        self.labels = label_train
+
+    def __getitem__(self, index: Tensor | int):
         return self.data[index], self.labels[index]
 
     def __len__(self):
@@ -174,7 +186,8 @@ class StrokeDataset(Dataset):
 
         # converter para tensores do PyTorch
         data = from_numpy(scaled).float()
-        print(self.data[:20])
         labels = from_numpy(np.asarray(labels, dtype=np.float32)).float()
-        print(self.labels[:20])
+
+        # Retorna tensores (X, y). Atribuições em nível de instância
+        # são feitas em `__init__` para evitar efeitos colaterais aqui.
         return data, labels
