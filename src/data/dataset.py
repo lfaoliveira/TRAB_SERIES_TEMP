@@ -5,7 +5,7 @@ import numpy as np
 
 import kagglehub
 import pandas as pd
-from pandera.typing import DataFrame
+from pandas import DataFrame
 from sklearn.preprocessing import StandardScaler
 from torch import from_numpy
 from torch.types import Tensor
@@ -50,10 +50,11 @@ class StrokeDataset(Dataset):
         self.PATH_FONTE_DADOS = PATH_FONTE_DADOS
         self.PATH_FONTE_DADOS.mkdir(exist_ok=True)
         self.frequency = CentralConfig.dataset_frequency
-        self.df_train, self.df_test = self.load_dataset()
-        self.data_prep()
+        df_train, df_test = self.load_dataset()
+        data_train, label_train = self.data_prep(df_train)
+        data_test, label_test = self.data_prep(df_test)
 
-    def __getitem__(self, index: Tensor | list[int] | int):
+    def __getitem__(self, index: Tensor):
         return self.data[index], self.labels[index]
 
     def __len__(self):
@@ -122,19 +123,15 @@ class StrokeDataset(Dataset):
 
     def data_prep(
         self,
-        df: DataFrame | None = None,
+        df: DataFrame,
         imputation: Literal["mean", "repeat", "interpolate"] | None = None,
-    ) -> None:
+    ) -> tuple[Tensor, Tensor]:
         """
         function for data normalization
 
         :param self: imputa dados faltantes (ou apenas dropa eles), normaliza dados
 
         """
-
-        # usar df fornecido ou o de treino como padrão
-        if df is None:
-            df = self.df_train
 
         # garantir numérico (força NaN se não for conversível)
         df = df.apply(pd.to_numeric, errors="coerce")
@@ -155,13 +152,14 @@ class StrokeDataset(Dataset):
             )
         elif imputation is None:
             df = df.dropna(axis=1, how="any")
+        else:
+            raise ValueError("")
 
         # converter para numpy array (n_series, timesteps)
         values = df.to_numpy(dtype=float)
 
         # normalizar por série (zero mean, unit std) usando StandardScaler
         # aplicamos StandardScaler em cada série (linha) individualmente
-        # aplicar StandardScaler em cada série (linha) individualmente
         scaled_rows = [
             StandardScaler().fit_transform(row.reshape(-1, 1)).ravel() for row in values
         ]
@@ -175,5 +173,8 @@ class StrokeDataset(Dataset):
         labels = values[:, -horizon:]
 
         # converter para tensores do PyTorch
-        self.data = from_numpy(scaled).float()
-        self.labels = from_numpy(np.asarray(labels, dtype=np.float32)).float()
+        data = from_numpy(scaled).float()
+        print(self.data[:20])
+        labels = from_numpy(np.asarray(labels, dtype=np.float32)).float()
+        print(self.labels[:20])
+        return data, labels
