@@ -1,14 +1,14 @@
 [project]
 name = "trab-series-temp"
 version = "0.1.0"
-description = "Add your description here"
+description = "Projeto de Detecção de Anomalias em Séries Temporais usando Deep Learning"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     # "fastparquet>=2026.5.0",
     "ipykernel>=7.2.0",
     "ipywidgets>=8.1.8",
-    "kagglehub>=1.0.1",
+    "kagglehub>=1.0.1",    #baixar dataset
     "lightning>=2.6.5",
     "logging>=0.4.9.6",
     "mlflow>=1.27.0",
@@ -23,13 +23,22 @@ dependencies = [
     "torch>=2.6.0",
 ]
 
+[dependency-groups]
+dev = ["taskipy>=1.12.0", "pytest>=8.0.0", "ruff>=0.3.0"]
+
+[tool.taskipy.tasks]
+# rodar com uv run task nome_da_task
+lint = "ruff check ."
+format = "ruff format ."
+test = "pytest -v"
+all = "task format && task lint && task test"
+
 [tool.uv.sources]
 # Instala versao com CUDA apenas em ambientes Linux (pensando no Kaggle)
 torch = [
     { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
     { index = "pytorch-cu124", marker = "sys_platform == 'linux'" },
 ]
-
 
 # index CPU
 [[tool.uv.index]]
