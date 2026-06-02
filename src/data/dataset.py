@@ -119,10 +119,6 @@ class StrokeDataset(Dataset):
             except Exception as e:
                 print(f"Falha ao salvar Parquet: {e}")
 
-        # Pré-processamento: remover NaN
-        df_train = df_train.dropna()
-        df_test = df_test.dropna()
-
         print(f"Dataset final: {df_train.shape}") if verbose else None
         print(f"Dataset final: {df_test.shape}") if verbose else None
 
@@ -159,31 +155,31 @@ class StrokeDataset(Dataset):
             )
         elif imputation is None:
             # TODO ADICIONAR THRESHOLD PARA DROPNA
-            df = df.dropna(axis=1, how="any")
+            df = df.dropna(axis=1, how="all")
         else:
             raise ValueError("")
 
-        # converter para numpy array (n_series, timesteps)
-        values = df.to_numpy(dtype=float)
-        print(f"VALUES: {values.shape}")
+        # converter para numpy array (timesteps, n_series)
+        values = df.to_numpy(dtype=np.float64)
 
         # normalizar por série (zero mean, unit std) usando StandardScaler
-        # aplicamos StandardScaler em cada série (linha) individualmente
-        scaled_rows = [
-            StandardScaler().fit_transform(row.reshape(-1, 1)).ravel() for row in values
+        # aplicamos StandardScaler em cada série (coluna) individualmente
+        scaled_cols = [
+            StandardScaler().fit_transform(col.reshape(-1, 1)).ravel()
+            for col in values.T
         ]
-        scaled = np.vstack(scaled_rows)
+        scaled = np.column_stack(scaled_cols)
 
         # definir horizon (últimos valores como labels) baseado na frequência
         freq_key = str(self.frequency)
-        horizon = Horizons.HORIZON.get(freq_key, 1)
+        horizon = Horizons.HORIZON.get(freq_key)
+        assert horizon is not None
 
-        labels = values[:, -horizon:]
+        # slice deve ser por linhas
+        labels = values[-horizon:, :]
 
         # converter para tensores do PyTorch
         data = from_numpy(scaled).float()
         labels = from_numpy(np.asarray(labels, dtype=np.float32)).float()
 
-        # Retorna tensores (X, y). Atribuições em nível de instância
-        # são feitas em `__init__` para evitar efeitos colaterais aqui.
         return data, labels
