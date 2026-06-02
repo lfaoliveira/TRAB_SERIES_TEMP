@@ -155,20 +155,19 @@ class StrokeDataset(Dataset):
             )
         elif imputation is None:
             # TODO ADICIONAR THRESHOLD PARA DROPNA
-            df = df.dropna(axis=1, how="all")
+            df = df.dropna(axis=0, how="all")
         else:
             raise ValueError("")
 
-        # converter para numpy array (timesteps, n_series)
+        # converter para numpy array (n_series, timesteps)
         values = df.to_numpy(dtype=np.float64)
 
         # normalizar por série (zero mean, unit std) usando StandardScaler
-        # aplicamos StandardScaler em cada série (coluna) individualmente
-        scaled_cols = [
-            StandardScaler().fit_transform(col.reshape(-1, 1)).ravel()
-            for col in values.T
+        # aplicamos StandardScaler em cada série (linha) individualmente
+        scaled_rows = [
+            StandardScaler().fit_transform(row.reshape(-1, 1)).ravel() for row in values
         ]
-        scaled = np.column_stack(scaled_cols)
+        scaled = np.vstack(scaled_rows)
 
         # definir horizon (últimos valores como labels) baseado na frequência
         freq_key = str(self.frequency)
