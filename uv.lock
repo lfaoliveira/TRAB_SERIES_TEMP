@@ -2222,6 +2222,26 @@ wheels = [
 ]
 
 [[package]]
+name = "pytorch-forecasting"
+version = "1.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "lightning" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "scikit-base" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "torch", version = "2.6.0+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "sys_platform == 'linux'" },
+    { name = "torch", version = "2.12.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'" },
+    { name = "torch", version = "2.12.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'emscripten' or sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4d/fd/49308e790a1caf35b8fe855ee1964efbb86537e96349e5f25526dd080df8/pytorch_forecasting-1.7.0.tar.gz", hash = "sha256:4be7569eb37051588195b0c92e140dea407d4b5b47086a26f2f42e6cccbfe59d", size = 313399, upload-time = "2026-04-05T12:40:55.914Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5d/19/c72a0e1e9a4972d6d01eab769fe8dd262f57a64bb8a2a25e79e636f61085/pytorch_forecasting-1.7.0-py3-none-any.whl", hash = "sha256:59f4bebe2a03ebc447e90c2841040b4901bb0735a7476a100d85f1bc9107b000", size = 403071, upload-time = "2026-04-05T12:40:54.151Z" },
+]
+
+[[package]]
 name = "pytorch-lightning"
 version = "2.6.5"
 source = { registry = "https://pypi.org/simple" }
@@ -2406,6 +2426,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b1/c0/1003b60edd697c649faf61f1a34094b1abb38fb3d1181e3f895781250a08/ruff-0.15.15-py3-none-win32.whl", hash = "sha256:29428ea79694afbe756d45fd59b36f22b6b020dc0443cf7de0173046236964b9", size = 10716774, upload-time = "2026-05-28T14:16:52.337Z" },
     { url = "https://files.pythonhosted.org/packages/02/a8/1269eddd6945a06c23f055ef7848886e37cf9d6a8bebb386a3115f01470c/ruff-0.15.15-py3-none-win_amd64.whl", hash = "sha256:8df0323902e15e24bc4bf246da830573d3cf3352bd0b9a164eab335d111ff4a4", size = 11868463, upload-time = "2026-05-28T14:16:11.333Z" },
     { url = "https://files.pythonhosted.org/packages/4e/b2/920464c907b191e37469d477a1aa8bc048b8f36c4c1610dfa4ab87b39e18/ruff-0.15.15-py3-none-win_arm64.whl", hash = "sha256:3c8ceca6792f38196b8f589bc92eccd03eef286602da92e5dc05cc42ef6441b7", size = 11138498, upload-time = "2026-05-28T14:16:38.425Z" },
+]
+
+[[package]]
+name = "scikit-base"
+version = "0.13.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4a/47/7954094adee334012d7182c2f78bb5f134f6ec93e28a0fdc6856de5ed4f6/scikit_base-0.13.2.tar.gz", hash = "sha256:c78245064754781b17062ab183a03bc12b36163b9e5f2cfcb6f29f749be4b266", size = 135452, upload-time = "2026-04-13T21:14:50.269Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d8/2e/1488716735c31bf82c6898759d12771b3e0ff5daeb0f01b73b82a4462ad9/scikit_base-0.13.2-py3-none-any.whl", hash = "sha256:0a67063c0323b9521ede91cfcc87ce097126de5f9d5367abed6e76ff97a0eda5", size = 160792, upload-time = "2026-04-13T21:14:48.243Z" },
 ]
 
 [[package]]
@@ -2917,6 +2946,7 @@ dependencies = [
     { name = "pandas" },
     { name = "pandera" },
     { name = "pyarrow" },
+    { name = "pytorch-forecasting" },
     { name = "pyyaml" },
     { name = "scikit-learn" },
     { name = "seaborn" },
@@ -2945,6 +2975,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=3.0.2" },
     { name = "pandera", specifier = ">=0.31.1" },
     { name = "pyarrow", specifier = ">=24.0.0" },
+    { name = "pytorch-forecasting", specifier = ">=1.7.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "scikit-learn", specifier = ">=1.8.0" },
     { name = "seaborn", specifier = ">=0.13.2" },
