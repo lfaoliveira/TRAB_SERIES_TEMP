@@ -1,15 +1,9 @@
-import os
 from pathlib import Path
-from typing import Literal
-import numpy as np
 
-import kagglehub
 import pandas as pd
 from pandas import DataFrame
-from sklearn.preprocessing import StandardScaler
-from torch import from_numpy
-from torch.types import Tensor
-from torch.utils.data import Dataset
+from pytorch_forecasting import TimeSeriesDataSet
+from pytorch_forecasting.data import GroupNormalizer
 
 from src.config.config import ProjectSettings
 
@@ -33,152 +27,165 @@ class Horizons:
         "Hourly": 16,
     }
 
+    @classmethod
+    def input_width(cls, frequency: str) -> int:
+        return cls.INPUT_WIDTH[frequency]
 
-class StrokeDataset(Dataset):
-    original_df: DataFrame
-    dataframe: DataFrame
-    data_train: Tensor
-    labels_train: Tensor
+    @classmethod
+    def output_width(cls, frequency: str) -> int:
+        return cls.HORIZON[frequency]
 
-    data_test: Tensor
-    labels_test: Tensor
-    LABELS_COLUMN: str
 
-    def __init__(
-        self,
-        PATH_FONTE_DADOS: Path = Path("/data/m4"),
-    ) -> None:
-        super().__init__()
-
+class StrokeDataset:
+    def __init__(self, PATH_FONTE_DADOS: Path = Path("data/m4")) -> None:
         self.PATH_FONTE_DADOS = PATH_FONTE_DADOS
-        self.PATH_FONTE_DADOS.mkdir(exist_ok=True)
+        self.PATH_FONTE_DADOS.mkdir(parents=True, exist_ok=True)
         self.frequency = ProjectSettings.dataset_frequency
-        df_train, df_test = self.load_dataset()
+        self.input_width = Horizons.input_width(self.frequency)
+        self.output_width = Horizons.output_width(self.frequency)
+        self.series_normalizer = GroupNormalizer(groups=["series_id"])
 
-        # Preparar tensores para treino e teste
-        data_train, label_train = self.data_prep(df_train, imputation=None)
-        data_test, label_test = self.data_prep(df_test, imputation=None)
+        self.df_train_wide, self.df_test_wide = self.load_dataset()
+        self.df_train = self._wide_to_long(self.df_train_wide)
+        self.df_test = self._wide_to_long(self.df_test_wide)
 
-        # Armazenar tensores como atributos da instância
-        self.data_train = data_train
-        self.labels_train = label_train
-        # Manter também versões de teste separadas
-        self.data_test = data_test
-        self.labels_test = label_test
+        self.train_dataset = self._build_dataset(self.df_train)
+        self.test_dataset = self.build_test_dataset(self.train_dataset)
+        self.val_dataset = self.build_validation_dataset(self.train_dataset)
 
     def load_dataset(self, verbose=False) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Carrega dataset do Kaggle, salva em Parquet.
-
-        Args:
-            path_dados: Caminho para armazenar dados
-            usar_parquet: Se True, tenta ler de Parquet primeiro
-
-        Returns:
-            DataFrame pré-processado
+        Carrega os arquivos M4 em wide format e cachea em Parquet.
         """
+        pqt_train = self.PATH_FONTE_DADOS / f"{self.frequency}-train.parquet"
+        pqt_test = self.PATH_FONTE_DADOS / f"{self.frequency}-test.parquet"
+        csv_train = self.PATH_FONTE_DADOS / f"{self.frequency}-train.csv"
+        csv_test = self.PATH_FONTE_DADOS / f"{self.frequency}-test.csv"
 
-        dataset_train = self.PATH_FONTE_DADOS / f"{self.frequency}-train.parquet"
-        dataset_test = self.PATH_FONTE_DADOS / f"{self.frequency}-test.parquet"
-
-        # Carregar dados se existir
-        if dataset_train.exists():
-            print(
-                f"Lendo dataset a partir de Parquet: {dataset_train}"
-            ) if verbose else None
-
-            df_train = pd.read_parquet(dataset_train, engine="auto")
-            df_test = pd.read_parquet(dataset_test, engine="auto")
+        # Tentar carregar do cache Parquet
+        if pqt_train.exists() and pqt_test.exists():
+            if verbose:
+                print(f"Carregando cache: {pqt_train}")
+            df_train = pd.read_parquet(pqt_train, engine="auto")
+            df_test = pd.read_parquet(pqt_test, engine="auto")
         else:
-            # baixar do Kaggle
-            print(
-                f"Baixando dataset  M4 todo via Kagglehub em {self.PATH_FONTE_DADOS}"
-            ) if verbose else None
-            kagglehub.dataset_download(
-                "yogesh94/m4-forecasting-competition-dataset",
-                output_dir=str(self.PATH_FONTE_DADOS),
-            )
+            # Download remoto se necessário
+            if not csv_train.exists() or not csv_test.exists():
+                if verbose:
+                    print(f"Baixando M4 via KaggleHub para {self.PATH_FONTE_DADOS}")
+                import kagglehub
 
-            file_csv = str(dataset_train).replace("parquet", "csv")
-            df_train = pd.read_csv(file_csv, header="infer", index_col=0)
-            file_csv_test = str(dataset_test).replace("parquet", "csv")
-            df_test = pd.read_csv(file_csv_test, header="infer", index_col=0)
+                kagglehub.dataset_download(
+                    "yogesh94/m4-forecasting-competition-dataset",
+                    output_dir=str(self.PATH_FONTE_DADOS),
+                )
 
+            if not csv_train.exists() or not csv_test.exists():
+                raise FileNotFoundError(
+                    f"CSVs do M4 não encontrados em {self.PATH_FONTE_DADOS}"
+                )
+
+            # Carregue dos CSVs
+            df_train = pd.read_csv(csv_train, header="infer", index_col=0)
+            df_test = pd.read_csv(csv_test, header="infer", index_col=0)
+
+            # Cachear em Parquet
             try:
                 df_train.to_parquet(
-                    dataset_train, compression="gzip", engine="auto", index=True
+                    pqt_train, compression="gzip", engine="auto", index=True
                 )
                 df_test.to_parquet(
-                    dataset_test, compression="gzip", engine="auto", index=True
+                    pqt_test, compression="gzip", engine="auto", index=True
                 )
-
-                print(
-                    f"Dataset salvo com sucesso em: {dataset_train} e {dataset_test}"
-                ) if verbose else None
-
+                if verbose:
+                    print(f"Cache criado: {pqt_train} e {pqt_test}")
             except Exception as e:
-                print(f"Falha ao salvar Parquet: {e}")
+                if verbose:
+                    print(f"Aviso: não foi possível cachear Parquet: {e}")
 
-        print(f"Dataset final: {df_train.shape}") if verbose else None
-        print(f"Dataset final: {df_test.shape}") if verbose else None
+        if verbose:
+            print(f"Dataset: treino {df_train.shape}, teste {df_test.shape}")
 
         return df_train, df_test
 
-    def data_prep(
-        self,
-        df: DataFrame,
-        imputation: Literal["mean", "repeat", "interpolate"] | None = None,
-    ) -> tuple[Tensor, Tensor]:
-        """
-        function for data normalization
+    def _wide_to_long(self, df: DataFrame) -> DataFrame:
+        """Converte formato wide do M4 para formato longo do TimeSeriesDataSet."""
+        frame = df.copy()
+        frame.index = frame.index.astype(str)
+        frame.index.name = "series_id"
 
-        :param self: imputa dados faltantes (ou apenas dropa eles), normaliza dados
+        long_df = frame.reset_index().melt(
+            id_vars="series_id", var_name="time_step", value_name="target"
+        )
+        long_df["target"] = pd.to_numeric(long_df["target"], errors="raise")
+        long_df["time_idx"] = long_df["time_step"].str.extract(r"(\d+)")
+        long_df["time_idx"] = long_df["time_idx"].astype(int) - 1
 
-        """
+        return (
+            long_df.dropna(subset=["target"])
+            .sort_values(["series_id", "time_idx"])
+            .reset_index(drop=True)[["series_id", "time_idx", "target"]]
+        )
 
-        # garantir numérico (força NaN se não for conversível)
-        df = df.apply(pd.to_numeric, errors="coerce")
+    def _build_dataset(self, data: DataFrame) -> TimeSeriesDataSet:
+        return TimeSeriesDataSet(
+            data,
+            time_idx="time_idx",
+            target="target",
+            group_ids=["series_id"],
+            max_encoder_length=self.input_width,
+            min_encoder_length=self.input_width,
+            max_prediction_length=self.output_width,
+            min_prediction_length=self.output_width,
+            time_varying_known_reals=["time_idx"],
+            time_varying_unknown_reals=["target"],
+            target_normalizer=self.series_normalizer,
+            add_relative_time_idx=True,
+            add_target_scales=True,
+            add_encoder_length=True,
+            allow_missing_timesteps=False,
+        )
 
-        # imputação por série (coluna)
-        if imputation == "mean":
-            df = df.apply(lambda col: col.fillna(col.mean()), axis=0)
-        elif imputation == "repeat":
-            df = df.apply(
-                lambda col: col.fillna(method="ffill").fillna(method="bfill"), axis=0
-            )
-        elif imputation == "interpolate":
-            df = df.apply(
-                lambda row: (
-                    row.interpolate().fillna(method="bfill").fillna(method="ffill")
-                ),
-                axis=0,
-            )
-        elif imputation is None:
-            # TODO ADICIONAR THRESHOLD PARA DROPNA
-            df = df.dropna(axis=0, how="all")
-        else:
-            raise ValueError("")
+    def build_train_dataset(self) -> TimeSeriesDataSet:
+        return self._build_dataset(self.df_train)
 
-        # converter para numpy array (n_series, timesteps)
-        values = df.to_numpy(dtype=np.float64)
+    def build_validation_dataset(
+        self, train_dataset: TimeSeriesDataSet
+    ) -> TimeSeriesDataSet:
+        return TimeSeriesDataSet.from_dataset(
+            train_dataset,
+            self.df_train,
+            predict=True,
+            stop_randomization=True,
+        )
 
-        # normalizar por série (zero mean, unit std) usando StandardScaler
-        # aplicamos StandardScaler em cada série (linha) individualmente
-        scaled_rows = [
-            StandardScaler().fit_transform(row.reshape(-1, 1)).ravel() for row in values
-        ]
-        scaled = np.vstack(scaled_rows)
+    def build_test_dataset(self, train_dataset: TimeSeriesDataSet) -> TimeSeriesDataSet:
+        return TimeSeriesDataSet.from_dataset(
+            train_dataset,
+            self._evaluation_frame(),
+            predict=True,
+            stop_randomization=True,
+        )
 
-        # definir horizon (últimos valores como labels) baseado na frequência
-        freq_key = str(self.frequency)
-        horizon = Horizons.HORIZON.get(freq_key)
-        assert horizon is not None
+    def _evaluation_frame(self) -> DataFrame:
+        """Concatena treino e teste em sequência temporal contínua."""
+        frames = []
 
-        # slice deve ser por linhas
-        labels = values[-horizon:, :]
+        for series_id, train_group in self.df_train.groupby("series_id", sort=False):
+            test_group = self.df_test[self.df_test["series_id"] == series_id]
+            if test_group.empty:
+                continue
 
-        # converter para tensores do PyTorch
-        data = from_numpy(scaled).float()
-        labels = from_numpy(np.asarray(labels, dtype=np.float32)).float()
+            test_group = test_group.copy()
+            start_idx = int(train_group["time_idx"].max()) + 1
+            test_group["time_idx"] = range(start_idx, start_idx + len(test_group))
+            frames.append(pd.concat([train_group, test_group], ignore_index=True))
 
-        return data, labels
+        if not frames:
+            raise ValueError("Nenhuma série encontrada para avaliação.")
+
+        return (
+            pd.concat(frames, ignore_index=True)
+            .sort_values(["series_id", "time_idx"])
+            .reset_index(drop=True)
+        )

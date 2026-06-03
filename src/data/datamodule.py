@@ -1,7 +1,5 @@
 from lightning.pytorch.core.datamodule import LightningDataModule
 from src.data.dataset import StrokeDataset
-from torch.utils.data import DataLoader, TensorDataset, random_split
-import numpy as np
 
 
 class StrokeDataModule(LightningDataModule):
@@ -13,28 +11,26 @@ class StrokeDataModule(LightningDataModule):
 
     # preparacao dos dados
     def prepare_data(self):
-        # NOTE: cuidado para nao carregar dados pesados demais na memoria (estoura memoria da GPU!!!)
+        # Carrega os dados em memoria uma vez por processo.
         self.dataset = StrokeDataset()
 
     # setup for transformation and augmentation
     def setup(self, stage=None):
-        # Criar TensorDatasets para treino e teste
-        dataset_train = TensorDataset(
-            self.dataset.data_train, self.dataset.labels_train
-        )
-        dataset_test = TensorDataset(self.dataset.data_test, self.dataset.labels_test)
+        self.m4_train = self.dataset.build_train_dataset()
+        self.m4_val = self.dataset.build_validation_dataset(self.m4_train)
+        self.m4_test = self.dataset.build_test_dataset(self.m4_train)
 
-        # Split treino em train (80%) e validação (20%)
-        train_size = int(0.8 * len(dataset_train))
-        val_size = len(dataset_train) - train_size
-        self.m4_train, self.m4_val = random_split(dataset_train, [train_size, val_size])
-        self.m4_test = dataset_test
+    def _resolve_batch_size(self, batch_size: int | None) -> int:
+        resolved_batch_size = batch_size if batch_size is not None else self.BATCH_SIZE
+        if resolved_batch_size is None:
+            raise ValueError("BATCH_SIZE precisa ser informado no datamodule.")
+        return resolved_batch_size
 
     def train_dataloader(self, BATCH_SIZE: int | None = None):
-        BATCH_SIZE = BATCH_SIZE if BATCH_SIZE else self.BATCH_SIZE
+        BATCH_SIZE = self._resolve_batch_size(BATCH_SIZE)
 
-        train_loader = DataLoader(
-            self.m4_train,
+        train_loader = self.m4_train.to_dataloader(
+            train=True,
             batch_size=BATCH_SIZE,
             num_workers=self.WORKERS,
             persistent_workers=True,
@@ -42,9 +38,9 @@ class StrokeDataModule(LightningDataModule):
         return train_loader
 
     def val_dataloader(self, BATCH_SIZE: int | None = None):
-        BATCH_SIZE = BATCH_SIZE if BATCH_SIZE else self.BATCH_SIZE
-        val_loader = DataLoader(
-            self.m4_val,
+        BATCH_SIZE = self._resolve_batch_size(BATCH_SIZE)
+        val_loader = self.m4_val.to_dataloader(
+            train=False,
             batch_size=BATCH_SIZE,
             num_workers=self.WORKERS,
             persistent_workers=True,
@@ -53,9 +49,9 @@ class StrokeDataModule(LightningDataModule):
 
     def test_dataloader(self, BATCH_SIZE: int | None = None):
         """Dataloader de teste"""
-        BATCH_SIZE = BATCH_SIZE if BATCH_SIZE else self.BATCH_SIZE
-        test_loader = DataLoader(
-            self.m4_test,
+        BATCH_SIZE = self._resolve_batch_size(BATCH_SIZE)
+        test_loader = self.m4_test.to_dataloader(
+            train=False,
             batch_size=BATCH_SIZE,
             num_workers=self.WORKERS,
             persistent_workers=True,
