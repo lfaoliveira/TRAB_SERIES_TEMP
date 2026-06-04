@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Any, Literal
 import mlflow
@@ -67,13 +68,11 @@ def residual_analysis(
     artifact_found = any(artifact.path == test_results_file for artifact in artifacts)
 
     if not artifact_found:
-        print(f"Artifact '{test_results_file}' not found in run {best_run.run_id}")
+        logging.info(f"Artifact '{test_results_file}' not found in run {best_run.run_id}")
         raise Exception("ARTIFACT NOT FOUND!")
 
     # Pass the loaded model to your analysis function
-    df_path = download_artifacts(
-        artifact_path=test_results_file, run_id=best_run.run_id
-    )
+    df_path = download_artifacts(artifact_path=test_results_file, run_id=best_run.run_id)
 
     prediction_df = pd.read_csv(df_path).dropna(how="any")
     if plot:
@@ -112,7 +111,7 @@ def final_analysis(
 
     experiment = mlflow.get_experiment_by_name(exp_name)
     if not experiment:
-        print(f"Experiment '{exp_name}' not found")
+        logging.info(f"Experiment '{exp_name}' not found")
         return pd.DataFrame(), processer
 
     all_experiment_runs = pd.DataFrame(
@@ -132,7 +131,7 @@ def final_analysis(
             runs = all_experiment_runs.copy()
 
         if runs.empty:
-            print(f"No runs found for model '{choice}' in experiment '{exp_name}'")
+            logging.info(f"No runs found for model '{choice}' in experiment '{exp_name}'")
             continue
 
         model_metrics = {"model": choice}
@@ -177,6 +176,6 @@ def final_analysis(
             plot_all_runs_per_model(all_runs_metrics_dict, choice, output_dir)
 
         all_models_metrics.append(model_metrics)
-        print(f"Graphs exported to: {output_dir}")
+        logging.info(f"Graphs exported to: {output_dir}")
 
     return pd.DataFrame(all_models_metrics).set_index("model"), processer

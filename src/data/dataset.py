@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -49,29 +50,27 @@ class StrokeDataset:
         self.output_width: int = Horizons.output_width(self.frequency)
         self.series_normalizer = GroupNormalizer(groups=["series_id"])
 
-        verbose = True
-
         self.df_train_wide, self.df_test_wide = self.load_dataset()
         if ProjectSettings.run_mode == "prototype":
             # Fica com poucas series que nao sao nulas
             self.df_train_wide = self.df_train_wide.dropna()
 
         if verbose:
-            print("DADOS BAIXADOS E LIDOS!!")
+            logging.info("DADOS BAIXADOS E LIDOS!!")
         self.df_train: DataFrame = self._wide_to_long(self.df_train_wide)
         self.df_test: DataFrame = self._wide_to_long(self.df_test_wide)
 
         self.train_dataset: TimeSeriesDataSet = self._build_dataset(self.df_train)
         if verbose:
-            print("DATASET DE TREINO CRIADO!")
+            logging.info("DATASET DE TREINO CRIADO!")
         self.test_dataset: TimeSeriesDataSet = self.build_test_dataset(self.train_dataset)
         if verbose:
-            print("DATASET DE TESTE CRIADO!")
+            logging.info("DATASET DE TESTE CRIADO!")
         self.val_dataset: TimeSeriesDataSet = self.build_validation_dataset(
             self.train_dataset
         )
         if verbose:
-            print("DATASET DE VALIDAÇÂO CRIADO!")
+            logging.info("DATASET DE VALIDAÇÂO CRIADO!")
 
     def load_dataset(self, verbose=False) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
@@ -85,14 +84,16 @@ class StrokeDataset:
         # Tentar carregar do cache Parquet
         if pqt_train.exists() and pqt_test.exists():
             if verbose:
-                print(f"Carregando cache: {pqt_train}")
+                logging.info(f"Carregando cache: {pqt_train}")
             df_train: DataFrame = pd.read_parquet(pqt_train, engine="auto")
             df_test: DataFrame = pd.read_parquet(pqt_test, engine="auto")
         else:
             # Download remoto se necessário
             if not csv_train.exists() or not csv_test.exists():
                 if verbose:
-                    print(f"Baixando M4 via KaggleHub para {self.PATH_FONTE_DADOS}")
+                    logging.info(
+                        f"Baixando M4 via KaggleHub para {self.PATH_FONTE_DADOS}"
+                    )
                 import kagglehub
 
                 kagglehub.dataset_download(
@@ -118,13 +119,13 @@ class StrokeDataset:
                     pqt_test, compression="gzip", engine="auto", index=True
                 )
                 if verbose:
-                    print(f"Cache criado: {pqt_train} e {pqt_test}")
+                    logging.info(f"Cache criado: {pqt_train} e {pqt_test}")
             except Exception as e:
                 if verbose:
-                    print(f"Aviso: não foi possível cachear Parquet: {e}")
+                    logging.info(f"Aviso: não foi possível cachear Parquet: {e}")
 
         if verbose:
-            print(f"Dataset: treino {df_train.shape}, teste {df_test.shape}")
+            logging.info(f"Dataset: treino {df_train.shape}, teste {df_test.shape}")
 
         return df_train, df_test
 

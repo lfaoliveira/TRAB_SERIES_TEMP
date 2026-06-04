@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Literal, Optional
 import yaml
@@ -43,7 +44,7 @@ def load_config(path: Optional[Path] = None) -> CentralConfig:
 # Instância carregada ao importar o módulo
 try:
     ProjectSettings: CentralConfig = load_config()
-    print(ProjectSettings)
+    logging.info(ProjectSettings)
 except ValidationError as e:
     # O Pydantic lança ValidationError com detalhes amigáveis do que falhou
     raise RuntimeError(f"Falha na validação das configurações:\n{e}") from e
