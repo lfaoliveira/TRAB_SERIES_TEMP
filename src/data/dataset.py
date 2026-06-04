@@ -11,6 +11,8 @@ from darts.utils.data import (
     SequentialTorchInferenceDataset,
 )
 from src.config.config import ProjectSettings
+from pytorch_forecasting.data import GroupNormalizer
+from sklearn.preprocessing import StandardScaler
 
 
 class Horizons:
@@ -123,7 +125,7 @@ class StrokeDataset:
         # Iterando sobre cada linha (cada série temporal única do M4)
         for series_id, row in df.iterrows():
             # Remove valores nulos (o M4 wide preenche séries curtas com NaN no final)
-            clean_values = row.dropna().values
+            clean_values = np.array(row.dropna().values)
 
             if len(clean_values) == 0:
                 continue
@@ -133,7 +135,12 @@ class StrokeDataset:
             time_axis = np.arange(len(clean_values))
 
             # Cria o Dataframe individual esperado pelo Darts
-            single_ts_df = pd.DataFrame({"target": clean_values}, index=time_axis)
+            clean_values = StandardScaler().fit_transform((clean_values).reshape(-1, 1))
+            if series_id == "D1":
+                print(clean_values)
+            single_ts_df = pd.DataFrame(
+                {"target": clean_values.squeeze(axis=1)}, index=time_axis
+            )
 
             # Instancia o objeto TimeSeries do Darts
             ts = TimeSeries.from_dataframe(
@@ -165,9 +172,7 @@ class StrokeDataset:
         logging.info("SERIES DE VALIDAÇÃO CRIADAS!")
 
         # Teste: O dataset de teste do M4 são os passos futuros reais
-        self.test_series: List[TimeSeries] = self._wide_to_darts_series(
-            self.df_test_wide
-        )
+        self.test_series: List[TimeSeries] = self._wide_to_darts_series(self.df_test_wide)
 
         # ---#
 
