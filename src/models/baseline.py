@@ -55,8 +55,9 @@ class ZScoreOutlierDetector(OutlierDetector):
 
         medias_moveis = rolling.mean().dropna().reset_index(level=0, drop=True)
         stds_moveis = (
-            rolling.std(ddof=0).dropna().reset_index(level=0
-        , drop=True)  # dropna para evitar divisao por zero!
+            rolling.std(ddof=0)
+            .dropna()
+            .reset_index(level=0, drop=True)  # dropna para evitar divisao por zero!
         )
         logging.info("DROPANDO NAN NO ZSCORE PRA EVITAR DIVISAO POR ZERO!")
 

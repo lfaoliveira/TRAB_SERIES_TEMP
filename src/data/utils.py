@@ -68,11 +68,15 @@ def residual_analysis(
     artifact_found = any(artifact.path == test_results_file for artifact in artifacts)
 
     if not artifact_found:
-        logging.info(f"Artifact '{test_results_file}' not found in run {best_run.run_id}")
+        logging.info(
+            f"Artifact '{test_results_file}' not found in run {best_run.run_id}"
+        )
         raise Exception("ARTIFACT NOT FOUND!")
 
     # Pass the loaded model to your analysis function
-    df_path = download_artifacts(artifact_path=test_results_file, run_id=best_run.run_id)
+    df_path = download_artifacts(
+        artifact_path=test_results_file, run_id=best_run.run_id
+    )
 
     prediction_df = pd.read_csv(df_path).dropna(how="any")
     if plot:
@@ -131,7 +135,9 @@ def final_analysis(
             runs = all_experiment_runs.copy()
 
         if runs.empty:
-            logging.info(f"No runs found for model '{choice}' in experiment '{exp_name}'")
+            logging.info(
+                f"No runs found for model '{choice}' in experiment '{exp_name}'"
+            )
             continue
 
         model_metrics = {"model": choice}

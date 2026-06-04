@@ -6,7 +6,11 @@ import pytorch_lightning as pl
 
 class VAE(pl.LightningModule):
     def __init__(
-        self, input_dim: int, hidden_dim: int = 64, latent_dim: int = 16, lr: float = 1e-3
+        self,
+        input_dim: int,
+        hidden_dim: int = 64,
+        latent_dim: int = 16,
+        lr: float = 1e-3,
     ):
         # TODO: refazer tudo
         super().__init__()

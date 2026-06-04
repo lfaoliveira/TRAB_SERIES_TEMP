@@ -824,16 +824,6 @@ wheels = [
 ]
 
 [[package]]
-name = "hampel"
-version = "1.0.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-    { name = "pandas" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/39/0e/49c5d1bd48e5e26c8ba0564a9ebe55a655f1c2b3acecd50bbd49671083a7/hampel-1.0.2.tar.gz", hash = "sha256:08d5646b40c9f68190820d04e3a0cca37267f46731048683f68c5b932761075d", size = 78697, upload-time = "2023-09-19T14:52:31.96Z" }
-
-[[package]]
 name = "holidays"
 version = "0.98"
 source = { registry = "https://pypi.org/simple" }
@@ -3161,7 +3151,6 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "darts" },
-    { name = "hampel" },
     { name = "ipykernel" },
     { name = "ipywidgets" },
     { name = "kagglehub" },
@@ -3192,7 +3181,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "darts", specifier = ">=0.44.1" },
-    { name = "hampel", specifier = ">=1.0.2" },
     { name = "ipykernel", specifier = ">=7.2.0" },
     { name = "ipywidgets", specifier = ">=8.1.8" },
     { name = "kagglehub", specifier = ">=1.0.1" },

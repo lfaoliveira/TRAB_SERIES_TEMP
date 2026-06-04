@@ -165,7 +165,9 @@ class StrokeDataset:
         logging.info("SERIES DE VALIDAÇÃO CRIADAS!")
 
         # Teste: O dataset de teste do M4 são os passos futuros reais
-        self.test_series: List[TimeSeries] = self._wide_to_darts_series(self.df_test_wide)
+        self.test_series: List[TimeSeries] = self._wide_to_darts_series(
+            self.df_test_wide
+        )
 
         # ---#
 

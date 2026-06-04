@@ -63,7 +63,9 @@ class TorchStrokeDataset:
         self.train_dataset: TimeSeriesDataSet = self._build_dataset(self.df_train)
         if verbose:
             logging.info("DATASET DE TREINO CRIADO!")
-        self.test_dataset: TimeSeriesDataSet = self.build_test_dataset(self.train_dataset)
+        self.test_dataset: TimeSeriesDataSet = self.build_test_dataset(
+            self.train_dataset
+        )
         if verbose:
             logging.info("DATASET DE TESTE CRIADO!")
         self.val_dataset: TimeSeriesDataSet = self.build_validation_dataset(
