@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -11,7 +11,6 @@ from darts.utils.data import (
     SequentialTorchInferenceDataset,
 )
 from src.config.config import ProjectSettings
-from pytorch_forecasting.data import GroupNormalizer
 from sklearn.preprocessing import StandardScaler
 
 
@@ -44,10 +43,13 @@ class StrokeDataset:
     df_train_wide: DataFrame
     df_test_wide: DataFrame
 
-    def __init__(self, PATH_FONTE_DADOS: Path = Path("data/m4"), verbose=False) -> None:
+    def __init__(
+        self, PATH_FONTE_DADOS: Path = Path("data/m4"), normalize=False, verbose=False
+    ) -> None:
+
         self.PATH_FONTE_DADOS: Path = PATH_FONTE_DADOS
         self.PATH_FONTE_DADOS.mkdir(parents=True, exist_ok=True)
-        self.frequency = ProjectSettings.dataset_frequency
+        self.frequency = ProjectSettings.dataset.dataset_frequency
         self.input_width: int = Horizons.input_width(self.frequency)
         self.output_width: int = Horizons.output_width(self.frequency)
 
@@ -62,7 +64,7 @@ class StrokeDataset:
             # Garante o alinhamento das séries de teste com o protótipo
             self.df_test_wide = self.df_test_wide.loc[self.df_train_wide.index]
 
-        self.build_dataset()
+        self.build_dataset(normalize)
 
         if verbose:
             logging.info("SERIES CRIADAS!")
@@ -118,32 +120,37 @@ class StrokeDataset:
 
         return df_train, df_test
 
-    def _wide_to_darts_series(self, df: DataFrame) -> List[TimeSeries]:
+    def _wide_to_darts_series(self, df: DataFrame, normalize=False) -> List[TimeSeries]:
         """Converte diretamente o DataFrame Wide do M4 em uma lista de objetos Darts TimeSeries."""
         series_list = []
 
         # Iterando sobre cada linha (cada série temporal única do M4)
         for series_id, row in df.iterrows():
             # Remove valores nulos (o M4 wide preenche séries curtas com NaN no final)
-            clean_values = np.array(row.dropna().values)
+            clean_values = np.array(row.values)
+
+            if ProjectSettings.dataset.impute:
+                # TODO: Implementar imputacao de dados
+                pass
 
             if len(clean_values) == 0:
                 continue
 
             # Como o M4 original usa passos de tempo inteiros abstratos (V1, V2...),
             # criamos um range numérico simples para o índice.
-            time_axis = np.arange(len(clean_values))
+            time_axis: np.ndarray[Tuple[int]] = np.arange(len(clean_values))
+            if normalize:
+                clean_values = StandardScaler().fit_transform(
+                    (clean_values).reshape(-1, 1)
+                )
+                # squeeze pra retransformar em array 1D
+                clean_values = clean_values.squeeze(axis=1)
 
             # Cria o Dataframe individual esperado pelo Darts
-            clean_values = StandardScaler().fit_transform((clean_values).reshape(-1, 1))
-            if series_id == "D1":
-                print(clean_values)
-            single_ts_df = pd.DataFrame(
-                {"target": clean_values.squeeze(axis=1)}, index=time_axis
-            )
+            single_ts_df = pd.DataFrame({"target": clean_values}, index=time_axis)
 
             # Instancia o objeto TimeSeries do Darts
-            ts = TimeSeries.from_dataframe(
+            ts: TimeSeries = TimeSeries.from_dataframe(
                 single_ts_df,
                 value_cols="target",
                 time_col=None,  # Quando None, assume o índice do dataframe
@@ -156,11 +163,11 @@ class StrokeDataset:
 
         return series_list
 
-    def build_dataset(self):
+    def build_dataset(self, normalize=False) -> None:
 
         # No Darts, trabalhamos com List[TimeSeries] para múltiplas séries (Global Models)
         self.train_series: List[TimeSeries] = self._wide_to_darts_series(
-            self.df_train_wide
+            self.df_train_wide, normalize=normalize
         )
         logging.info("SERIES DE TREINO CRIADAS!")
 
@@ -172,7 +179,9 @@ class StrokeDataset:
         logging.info("SERIES DE VALIDAÇÃO CRIADAS!")
 
         # Teste: O dataset de teste do M4 são os passos futuros reais
-        self.test_series: List[TimeSeries] = self._wide_to_darts_series(self.df_test_wide)
+        self.test_series: List[TimeSeries] = self._wide_to_darts_series(
+            self.df_test_wide, normalize=normalize
+        )
 
         # ---#
 
