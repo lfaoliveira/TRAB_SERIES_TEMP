@@ -1,7 +1,6 @@
 import logging
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from pandas import DataFrame
 from pytorch_forecasting import TimeSeriesDataSet
@@ -45,7 +44,7 @@ class TorchStrokeDataset:
     def __init__(self, PATH_FONTE_DADOS: Path = Path("data/m4"), verbose=False) -> None:
         self.PATH_FONTE_DADOS: Path = PATH_FONTE_DADOS
         self.PATH_FONTE_DADOS.mkdir(parents=True, exist_ok=True)
-        self.frequency = ProjectSettings.dataset_frequency
+        self.frequency = ProjectSettings.dataset.dataset_frequency
         self.input_width: int = Horizons.input_width(self.frequency)
         self.output_width: int = Horizons.output_width(self.frequency)
         self.series_normalizer = GroupNormalizer(groups=["series_id"])
@@ -155,7 +154,7 @@ class TorchStrokeDataset:
         # gera exeption se tem NaN
 
         if data.isnull().values.any():
-            raise Exception(f"TEM NAN! ")
+            raise Exception("TEM NAN! ")
 
         return TimeSeriesDataSet(
             data,

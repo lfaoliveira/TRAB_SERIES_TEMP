@@ -3,7 +3,6 @@ import logging
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.seasonal import STL
-from darts.ad.scorers.norm_scorer import NormScorer
 
 
 class OutlierDetector:
@@ -74,10 +73,6 @@ class ZScoreOutlierDetector(OutlierDetector):
         is_outlier = is_outlier.fillna(False)
 
         return pd.DataFrame(is_outlier)
-
-    def filter(self, data: pd.DataFrame):
-
-        return df_targets[df_targets <= self.threshold]
 
 
 class HampelFilterOutlierDetector(OutlierDetector):
