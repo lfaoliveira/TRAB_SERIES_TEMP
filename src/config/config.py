@@ -10,6 +10,19 @@ RunMode = Literal["prototype", "train", "hyperot"]
 Frequency = Literal["Daily", "Hourly", "Quarterly", "Monthly", "Weekly"]
 
 
+class DatasetConfig(BaseModel):
+    """Configurações do dataset."""
+
+    model_config = ConfigDict(frozen=True)
+
+    dataset_frequency: Frequency = Field(
+        default="Daily", description="Frequência do dataset"
+    )
+    impute: bool = Field(
+        default=False, description="Se deve fazer imputação de dados faltantes"
+    )
+
+
 class CentralConfig(BaseModel):
     """Config tipada para o projeto usando pydantic."""
 
@@ -17,8 +30,8 @@ class CentralConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     run_mode: RunMode = Field(default="prototype", description="Modo de execução")
-    dataset_frequency: Frequency = Field(
-        default="Daily", description="frquencia do dataset"
+    dataset: DatasetConfig = Field(
+        default_factory=DatasetConfig, description="Configurações do dataset"
     )
 
 
@@ -31,8 +44,7 @@ def load_config(path: Optional[Path] = None) -> CentralConfig:
         project_root = Path(__file__).resolve().parents[2]
         path = project_root / "config.yaml"
 
-    if not path.exists():
-        return CentralConfig()
+    assert path.exists()
 
     with path.open("r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
