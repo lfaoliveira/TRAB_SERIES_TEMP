@@ -1,3 +1,5 @@
+line-length = 100
+
 exclude = [
     ".bzr",
     ".direnv",
@@ -29,3 +31,7 @@ exclude = [
     "m4_train_mlp.ipynb",
     "old.ipynb",
 ]
+
+select = ["E", "F", "T201"]
+[lint.per-file-ignores]
+"main.ipynb" = ["T201"]

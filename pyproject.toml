@@ -32,10 +32,9 @@ dev = ["taskipy>=1.12.0", "pytest>=8.0.0", "ruff>=0.3.0"]
 
 [tool.taskipy.tasks]
 # rodar com uv run task nome_da_task
-lint = "ruff check ."
-format = "ruff format ."
+lint = "ruff format . && ruff check ."
 test = "pytest -v"
-all = "task format && task lint && task test"
+all = "task lint && task test"
 
 [tool.uv.sources]
 # Instala versao com CUDA apenas em ambientes Linux (pensando no Kaggle)
