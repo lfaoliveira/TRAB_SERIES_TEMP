@@ -62,14 +62,10 @@ class TorchStrokeDataset:
         self.train_dataset: TimeSeriesDataSet = self._build_dataset(self.df_train)
         if verbose:
             logging.info("DATASET DE TREINO CRIADO!")
-        self.test_dataset: TimeSeriesDataSet = self.build_test_dataset(
-            self.train_dataset
-        )
+        self.test_dataset: TimeSeriesDataSet = self.build_test_dataset(self.train_dataset)
         if verbose:
             logging.info("DATASET DE TESTE CRIADO!")
-        self.val_dataset: TimeSeriesDataSet = self.build_validation_dataset(
-            self.train_dataset
-        )
+        self.val_dataset: TimeSeriesDataSet = self.build_validation_dataset(self.train_dataset)
         if verbose:
             logging.info("DATASET DE VALIDAÇÂO CRIADO!")
 
@@ -92,9 +88,7 @@ class TorchStrokeDataset:
             # Download remoto se necessário
             if not csv_train.exists() or not csv_test.exists():
                 if verbose:
-                    logging.info(
-                        f"Baixando M4 via KaggleHub para {self.PATH_FONTE_DADOS}"
-                    )
+                    logging.info(f"Baixando M4 via KaggleHub para {self.PATH_FONTE_DADOS}")
                 import kagglehub
 
                 kagglehub.dataset_download(
@@ -103,9 +97,7 @@ class TorchStrokeDataset:
                 )
 
             if not csv_train.exists() or not csv_test.exists():
-                raise FileNotFoundError(
-                    f"CSVs do M4 não encontrados em {self.PATH_FONTE_DADOS}"
-                )
+                raise FileNotFoundError(f"CSVs do M4 não encontrados em {self.PATH_FONTE_DADOS}")
 
             # Carregue dos CSVs
             df_train: DataFrame = pd.read_csv(csv_train, header="infer", index_col=0)
@@ -113,12 +105,8 @@ class TorchStrokeDataset:
 
             # Cachear em Parquet
             try:
-                df_train.to_parquet(
-                    pqt_train, compression="gzip", engine="auto", index=True
-                )
-                df_test.to_parquet(
-                    pqt_test, compression="gzip", engine="auto", index=True
-                )
+                df_train.to_parquet(pqt_train, compression="gzip", engine="auto", index=True)
+                df_test.to_parquet(pqt_test, compression="gzip", engine="auto", index=True)
                 if verbose:
                     logging.info(f"Cache criado: {pqt_train} e {pqt_test}")
             except Exception as e:
@@ -178,9 +166,7 @@ class TorchStrokeDataset:
     def build_train_dataset(self) -> TimeSeriesDataSet:
         return self._build_dataset(self.df_train)
 
-    def build_validation_dataset(
-        self, train_dataset: TimeSeriesDataSet
-    ) -> TimeSeriesDataSet:
+    def build_validation_dataset(self, train_dataset: TimeSeriesDataSet) -> TimeSeriesDataSet:
         return TimeSeriesDataSet.from_dataset(
             train_dataset,
             self.df_train,

@@ -84,9 +84,7 @@ class StrokeDataset:
         else:
             if not csv_train.exists() or not csv_test.exists():
                 if verbose:
-                    logging.info(
-                        f"Baixando M4 via KaggleHub para {self.PATH_FONTE_DADOS}"
-                    )
+                    logging.info(f"Baixando M4 via KaggleHub para {self.PATH_FONTE_DADOS}")
                 import kagglehub
 
                 kagglehub.dataset_download(
@@ -95,20 +93,14 @@ class StrokeDataset:
                 )
 
             if not csv_train.exists() or not csv_test.exists():
-                raise FileNotFoundError(
-                    f"CSVs do M4 não encontrados em {self.PATH_FONTE_DADOS}"
-                )
+                raise FileNotFoundError(f"CSVs do M4 não encontrados em {self.PATH_FONTE_DADOS}")
 
             df_train: DataFrame = pd.read_csv(csv_train, header="infer", index_col=0)
             df_test: DataFrame = pd.read_csv(csv_test, header="infer", index_col=0)
 
             try:
-                df_train.to_parquet(
-                    pqt_train, compression="gzip", engine="auto", index=True
-                )
-                df_test.to_parquet(
-                    pqt_test, compression="gzip", engine="auto", index=True
-                )
+                df_train.to_parquet(pqt_train, compression="gzip", engine="auto", index=True)
+                df_test.to_parquet(pqt_test, compression="gzip", engine="auto", index=True)
                 if verbose:
                     logging.info(f"Cache criado: {pqt_train} e {pqt_test}")
             except Exception as e:
@@ -140,9 +132,7 @@ class StrokeDataset:
             # criamos um range numérico simples para o índice.
             time_axis: np.ndarray[Tuple[int]] = np.arange(len(clean_values))
             if normalize:
-                clean_values = StandardScaler().fit_transform(
-                    (clean_values).reshape(-1, 1)
-                )
+                clean_values = StandardScaler().fit_transform((clean_values).reshape(-1, 1))
                 # squeeze pra retransformar em array 1D
                 clean_values = clean_values.squeeze(axis=1)
 
@@ -172,9 +162,7 @@ class StrokeDataset:
         logging.info("SERIES DE TREINO CRIADAS!")
 
         # Validação: No Darts, a validação geralmente são os últimos 'output_width' pontos do treino
-        self.val_series: List[TimeSeries] = [
-            ts[-self.output_width :] for ts in self.train_series
-        ]
+        self.val_series: List[TimeSeries] = [ts[-self.output_width :] for ts in self.train_series]
 
         logging.info("SERIES DE VALIDAÇÃO CRIADAS!")
 
@@ -205,7 +193,6 @@ class StrokeDataset:
 
     # Métodos para manter compatibilidade de assinatura externa se necessário
     def build_train_dataset(self) -> SequentialTorchTrainingDataset:
-
         return self.train_dataset
 
     def build_validation_dataset(self) -> SequentialTorchInferenceDataset:

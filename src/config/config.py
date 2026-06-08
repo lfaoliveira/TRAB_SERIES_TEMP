@@ -15,12 +15,8 @@ class DatasetConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    dataset_frequency: Frequency = Field(
-        default="Daily", description="Frequência do dataset"
-    )
-    impute: bool = Field(
-        default=False, description="Se deve fazer imputação de dados faltantes"
-    )
+    dataset_frequency: Frequency = Field(default="Daily", description="Frequência do dataset")
+    impute: bool = Field(default=False, description="Se deve fazer imputação de dados faltantes")
 
 
 class CentralConfig(BaseModel):

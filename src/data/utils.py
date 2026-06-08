@@ -35,9 +35,7 @@ def _grab_values(
 
         if metric_history:
             # Indexed by epoch number (sequence index) instead of mlflow step
-            metrics_dict[metric_name] = {
-                epoch: m.value for epoch, m in enumerate(metric_history)
-            }
+            metrics_dict[metric_name] = {epoch: m.value for epoch, m in enumerate(metric_history)}
 
     return metrics_dict
 
@@ -68,15 +66,11 @@ def residual_analysis(
     artifact_found = any(artifact.path == test_results_file for artifact in artifacts)
 
     if not artifact_found:
-        logging.info(
-            f"Artifact '{test_results_file}' not found in run {best_run.run_id}"
-        )
+        logging.info(f"Artifact '{test_results_file}' not found in run {best_run.run_id}")
         raise Exception("ARTIFACT NOT FOUND!")
 
     # Pass the loaded model to your analysis function
-    df_path = download_artifacts(
-        artifact_path=test_results_file, run_id=best_run.run_id
-    )
+    df_path = download_artifacts(artifact_path=test_results_file, run_id=best_run.run_id)
 
     prediction_df = pd.read_csv(df_path).dropna(how="any")
     if plot:
@@ -99,11 +93,13 @@ def final_analysis(
     residual=True,
     exp_name: str = "PROD_TRAINING",
 ) -> tuple[pd.DataFrame, ResultsProcesser]:
-    """Generate metrics and plots for trained models. residual indicates wether to store basic residual analysis information for later use.
+    """Generate metrics and plots for trained models. residual indicates wether to
+    store basic residual analysis information for later use.
 
     Args:
-        exp_name: MLflow experiment name. All models' runs are expected in this single experiment,
-                  filtered by run name containing the model choice (e.g. 'PROD_MLP', 'PROD_KAN').
+        exp_name:
+        MLflow experiment name. All models' runs are expected in this single experiment,
+        filtered by run name containing the model choice (e.g. 'PROD_MLP', 'PROD_KAN').
     """
 
     is_optuna = bool(os.environ.get("OPTUNA", False))
@@ -135,9 +131,7 @@ def final_analysis(
             runs = all_experiment_runs.copy()
 
         if runs.empty:
-            logging.info(
-                f"No runs found for model '{choice}' in experiment '{exp_name}'"
-            )
+            logging.info(f"No runs found for model '{choice}' in experiment '{exp_name}'")
             continue
 
         model_metrics = {"model": choice}
@@ -172,9 +166,7 @@ def final_analysis(
         # stores residual model and dataframe
         if residual and not runs.empty:
             ascending = "loss" in sort_metric
-            best_run = runs.sort_values(
-                f"metrics.{sort_metric}", ascending=ascending
-            ).iloc[0]
+            best_run = runs.sort_values(f"metrics.{sort_metric}", ascending=ascending).iloc[0]
             residual_analysis(client, best_run, choice, processer, plot=True)
 
         # Always plot combined view

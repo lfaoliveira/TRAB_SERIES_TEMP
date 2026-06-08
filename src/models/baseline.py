@@ -44,6 +44,7 @@ class ZScoreOutlierDetector(OutlierDetector):
         """
         Detect outliers in the data.
         Returns a boolean array where True indicates an outlier.
+
         """
         # opera ao longo das colunas!!!
         df = data.copy()
@@ -67,7 +68,7 @@ class ZScoreOutlierDetector(OutlierDetector):
         df_target = df - medias_moveis
         df_target = df_target / stds_moveis
 
-        # 3. Identifica os Outliers (Z-Score absoluto maior que 3)
+        # 3. Identifica os Outliers (Z-Score absoluto maior que threshold)
         # Preenche os NaNs iniciais da janela como False para não quebrar a lógica
         is_outlier = df_target.abs() > self.threshold
         is_outlier = is_outlier.fillna(False)
