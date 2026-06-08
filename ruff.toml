@@ -32,6 +32,6 @@ exclude = [
     "old.ipynb",
 ]
 
-select = ["E", "F", "T201"]
+lint.select = ["E", "F", "T201"]
 [lint.per-file-ignores]
 "main.ipynb" = ["T201"]

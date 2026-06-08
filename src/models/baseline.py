@@ -3,6 +3,7 @@ import logging
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.seasonal import STL
+from darts.ad.detectors import QuantileDetector
 
 
 class OutlierDetector:
@@ -31,7 +32,7 @@ class ZScoreOutlierDetector(OutlierDetector):
         group_id="series_id",
         target_id: str = "target",
         window_size=7,
-        threshold=3,
+        threshold: tuple[float, float] = (0.1, 0.1),
     ):
         super().__init__(
             target_id=target_id,
@@ -51,25 +52,13 @@ class ZScoreOutlierDetector(OutlierDetector):
         df = df.T
 
         df_groups = df.groupby(self.group_id)
-        rolling = df_groups.loc[self.target_id, :].rolling(self.window_size)
-
-        medias_moveis = rolling.mean().dropna().reset_index(level=0, drop=True)
-        stds_moveis = (
-            rolling.std(ddof=0)
-            .dropna()
-            .reset_index(level=0, drop=True)  # dropna para evitar divisao por zero!
-        )
-        logging.info("DROPANDO NAN NO ZSCORE PRA EVITAR DIVISAO POR ZERO!")
-
-        # 2. formula do Z-Score
-        # transforma 0 em nan pra evitar divisao por zero
-        stds_moveis = stds_moveis.apply(lambda x: x if x != 0 else np.nan)
-
-        df_target = df - medias_moveis
-        df_target = df_target / stds_moveis
-
-        # 3. Identifica os Outliers (Z-Score absoluto maior que threshold)
-        # Preenche os NaNs iniciais da janela como False para não quebrar a lógica
+        low, high = self.threshold
+        detector = QuantileDetector(low, high)
+        outlier_list = []
+        for group_name, grupo_df in df_groups:
+            outliers = detector.detect(pd.Series(grupo_df["target"]))
+            outlier_list.append(outliers)
+        outlier_df = pd.DataFrame(outlier_list)
         is_outlier = df_target.abs() > self.threshold
         is_outlier = is_outlier.fillna(False)
 
@@ -124,9 +113,7 @@ class STLHampelOutlierDetector(OutlierDetector):
 
     def __init__(self, period=None, window_size=10, n_sigmas=3):
         self.period = period
-        self.hampel = HampelFilterOutlierDetector(
-            window_size=window_size, n_sigmas=n_sigmas
-        )
+        self.hampel = HampelFilterOutlierDetector(window_size=window_size, n_sigmas=n_sigmas)
 
     def detect(self, data):
         """

@@ -1,10 +1,7 @@
 #----- PROJECT CONFIGURATIONS ------#
 #----- VER src/config/config.py para ver valores válidos------#
-run_mode: train
+run_mode: prototype
 
 dataset:
-  dataset_frequency: "Daily"
-  impute: False
-
-
-  
+    dataset_frequency: "Daily"
+    impute: False
