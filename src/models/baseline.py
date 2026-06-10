@@ -1,5 +1,5 @@
-import logging
-from typing import Callable, List
+from typing import Any, Callable, List
+
 
 import numpy as np
 import pandas as pd
@@ -9,7 +9,7 @@ from darts import TimeSeries
 from abc import ABC, abstractmethod
 
 
-WindowPredicate = Callable[[np.ndarray], bool]
+type WindowPredicate = Callable[[np.ndarray, Any], pd.Series[bool]]
 
 
 class OutlierDetector(ABC):
@@ -33,32 +33,12 @@ Muito mais simples: pd.Series.rolling() cuida de janelas, padding e alinhamento.
 """
 
 
-from __future__ import annotations
-
-from typing import Callable, List, Sequence
-
-import numpy as np
-import pandas as pd
-
-
-# ---------------------------------------------------------------------------
-# Type aliases
-# ---------------------------------------------------------------------------
-
-TimeSeries = Sequence[float]
-
 # input: Pd.Series, output: bool
-WindowPredicate = Callable[[pd.Series], list[bool]]
 
 
 # ---------------------------------------------------------------------------
 # Core function
 # ---------------------------------------------------------------------------
-
-
-def printar(x):
-    print(x)
-    return x
 
 
 def rolling_window_apply(
@@ -98,7 +78,7 @@ def rolling_window_apply(
     step = window_size if not overlap else None
 
     for series in series_list:
-        s = pd.Series(series, dtype=float)
+        s = pd.Series(series.univariate_values(), dtype=float)
 
         rolling = s.rolling(
             window=window_size, step=step, min_periods=window_size, center=True
@@ -123,9 +103,11 @@ def threshold_mean(threshold: float) -> WindowPredicate:
     return lambda w: w.mean() > threshold
 
 
-def any_above(threshold: float) -> WindowPredicate:
-
-    return lambda w: w > threshold
+def any_above(series: pd.Series | None = None, threshold: float = 0) -> pd.Series:
+    if series is not None:
+        return series > threshold
+    else:
+        return pd.Series(np.array([False], dtype=bool))
 
 
 def is_monotone_increasing() -> WindowPredicate:
@@ -168,9 +150,7 @@ if __name__ == "__main__":
     pprint.pprint(
         [
             r.tolist()
-            for r in rolling_window_apply(
-                series_list, WINDOW, std_below(2), overlap=False
-            )
+            for r in rolling_window_apply(series_list, WINDOW, any_above, overlap=False)
         ]
     )
 
