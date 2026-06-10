@@ -1,218 +1,229 @@
-import logging
+from __future__ import annotations
+
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
-from pandas import DataFrame
-from darts import TimeSeries
-from darts.utils.data import (
-    SequentialTorchTrainingDataset,
-    SequentialTorchInferenceDataset,
-)
+
 from src.config.config import ProjectSettings
-from sklearn.preprocessing import StandardScaler
-
-
-class Horizons:
-    HORIZON: dict[str, int] = {
-        "Yearly": 6,
-        "Quarterly": 8,
-        "Monthly": 18,
-        "Daily": 14,
-        "Hourly": 48,
-    }
-    INPUT_WIDTH: dict[str, int] = {
-        "Yearly": 8,
-        "Quarterly": 10,
-        "Monthly": 28,
-        "Daily": 7,
-        "Hourly": 16,
-    }
-
-    @classmethod
-    def input_width(cls, frequency: str) -> int:
-        return cls.INPUT_WIDTH[frequency]
-
-    @classmethod
-    def output_width(cls, frequency: str) -> int:
-        return cls.HORIZON[frequency]
+from pytorch_forecasting import TimeSeriesDataSet
+from pytorch_forecasting.data import GroupNormalizer
+from src.data.torch_dataset import Horizons
 
 
 class StrokeDataset:
-    df_train_wide: DataFrame
-    df_test_wide: DataFrame
+    """Loads telemetry .npy time series and labeled anomalies for outlier detection.
 
-    def __init__(
-        self, PATH_FONTE_DADOS: Path = Path("data/m4"), normalize=False, verbose=False
-    ) -> None:
+    Exposes the same minimal interface used by the existing datamodule:
+      - build_train_dataset()
+      - build_validation_dataset(train_dataset)
+      - build_test_dataset(train_dataset)
 
-        self.PATH_FONTE_DADOS: Path = PATH_FONTE_DADOS
-        self.PATH_FONTE_DADOS.mkdir(parents=True, exist_ok=True)
+    Internally this class provides `df_train_wide` and `df_test_wide` in a
+    wide-format DataFrame (index=series_id, columns as integer time steps) and
+    converts to the long format required by the torch forecasting pipeline.
+    """
+
+    def __init__(self, base_path: Path | str = "data/m4", normalize=False) -> None:
+        self.base_path = Path(base_path)
+        self.train_dir = self.base_path / "data" / "train"
+        self.test_dir = self.base_path / "data" / "test"
+        self.labels_file = self.base_path / "labeled_anomalies.csv"
+
+        self.df_train_wide, self.df_test_wide = self._load_npy_dataset()
+
+        # Convert to long format used by torch dataset builders in the repo
+        self.labels_df = self._read_labels()
+
+        self.df_train = self._wide_to_long(self.df_train_wide, include_labels=False)
+        self.df_test = self._wide_to_long(self.df_test_wide, include_labels=True)
+
+        # dataset hyperparams
         self.frequency = ProjectSettings.dataset.dataset_frequency
-        self.input_width: int = Horizons.input_width(self.frequency)
-        self.output_width: int = Horizons.output_width(self.frequency)
+        self.input_width = Horizons.input_width(self.frequency)
+        self.output_width = Horizons.output_width(self.frequency)
+        self.series_normalizer = GroupNormalizer(groups=["series_id"])
 
-        # Carrega dados originais (formato Wide)
-        self.df_train_wide, self.df_test_wide = self.load_dataset(verbose=verbose)
-        if verbose:
-            logging.info("DADOS BAIXADOS E LIDOS!!")
+        # build TimeSeriesDataSet objects lazily
+        self.train_dataset = None
+        self.test_dataset = None
+        self.val_dataset = None
 
-        if ProjectSettings.run_mode == "prototype":
-            # Mantém poucas séries que têm um tamanho mínimo aceitável
-            self.df_train_wide = self.df_train_wide.dropna(how="any", axis=1)
-            logging.info(f"DF TRAIN: {self.df_train_wide.head(10)}")
-            # Garante o alinhamento das séries de teste com o protótipo
-            self.df_test_wide = self.df_test_wide.loc[self.df_train_wide.index]
 
-        self.build_dataset(normalize)
+    def _read_labels(self) -> pd.DataFrame:
+        """Reads labeled_anomalies.csv if present and returns a DataFrame.
 
-        if verbose:
-            logging.info("SERIES CRIADAS!")
+        Expected CSV format with columns: ``series_id,start,end`` where start/end
+        are integer positions (0-based or 1-based). This function will attempt to
+        coerce to integers. If the file is missing, returns empty DataFrame.
+        """
+        if not self.labels_file.exists():
+            return pd.DataFrame(columns=["series_id", "start", "end"])
 
-    def load_dataset(self, verbose=False) -> Tuple[DataFrame, DataFrame]:
-        """Carrega os arquivos M4 em wide format e cachea em Parquet."""
-        pqt_train: Path = self.PATH_FONTE_DADOS / f"{self.frequency}-train.parquet"
-        pqt_test: Path = self.PATH_FONTE_DADOS / f"{self.frequency}-test.parquet"
-        csv_train: Path = self.PATH_FONTE_DADOS / f"{self.frequency}-train.csv"
-        csv_test: Path = self.PATH_FONTE_DADOS / f"{self.frequency}-test.csv"
+        df = pd.read_csv(self.labels_file)
+        # normalize column names
+        df = df.rename(columns={c: c.strip() for c in df.columns})
+        expected = [c for c in ["series_id", "start", "end"] if c in df.columns]
+        if not set(["series_id", "start", "end"]).issubset(df.columns):
+            return pd.DataFrame(columns=["series_id", "start", "end"])
 
-        if pqt_train.exists() and pqt_test.exists():
-            if verbose:
-                logging.info(f"Carregando cache: {pqt_train}")
-            df_train: DataFrame = pd.read_parquet(pqt_train, engine="auto")
-            df_test: DataFrame = pd.read_parquet(pqt_test, engine="auto")
-        else:
-            if not csv_train.exists() or not csv_test.exists():
-                if verbose:
-                    logging.info(
-                        f"Baixando M4 via KaggleHub para {self.PATH_FONTE_DADOS}"
-                    )
-                import kagglehub
+        df = df[ ["series_id", "start", "end"] ].copy()
+        df["start"] = pd.to_numeric(df["start"], errors="coerce").astype("Int64")
+        df["end"] = pd.to_numeric(df["end"], errors="coerce").astype("Int64")
+        return df.dropna()
 
-                kagglehub.dataset_download(
-                    "yogesh94/m4-forecasting-competition-dataset",
-                    output_dir=str(self.PATH_FONTE_DADOS),
-                )
+    def _series_to_wide(self, series_dict: Dict[str, np.ndarray] | None) -> pd.DataFrame:
+        """Constructs a wide DataFrame from a dict of arrays.
 
-            if not csv_train.exists() or not csv_test.exists():
-                raise FileNotFoundError(
-                    f"CSVs do M4 não encontrados em {self.PATH_FONTE_DADOS}"
-                )
+        Shorter series are right-padded with NaN to match the longest length.
+        Columns are integer time indices starting at 0.
+        """
+        if not series_dict:
+            return pd.DataFrame()
+        #
+        max_len = max(len(v) for v in series_dict.values())
+        data = {}
+        for series_id, arr in series_dict.items():
+                data[series_id] = pd.Series(arr)
+            
 
-            df_train: DataFrame = pd.read_csv(csv_train, header="infer", index_col=0)
-            df_test: DataFrame = pd.read_csv(csv_test, header="infer", index_col=0)
+        # DataFrame with columns as series_ids and rows as time steps; we want
+        # index=series_id and columns=time steps -> transpose
+        df = pd.DataFrame(data)
+        df = df.T
+        # Set ordered integer column names
+        df.columns = [f"t{idx+1}" for idx in range(df.shape[1])]
+        df.index.name = "series_id"
+        return df
+    def _load_npy_directory(self, directory: Path) -> Dict[str, np.ndarray]:
+        """Reads all .npy files in a directory and returns a dict series_id->array."""
+        series: Dict[str, np.ndarray] = {}
+        if not directory.exists():
+            return series
 
+        for p in sorted(directory.glob("*.npy")):
+            series_id = p.stem
             try:
-                df_train.to_parquet(
-                    pqt_train, compression="gzip", engine="auto", index=True
-                )
-                df_test.to_parquet(
-                    pqt_test, compression="gzip", engine="auto", index=True
-                )
-                if verbose:
-                    logging.info(f"Cache criado: {pqt_train} e {pqt_test}")
-            except Exception as e:
-                if verbose:
-                    logging.info(f"Aviso: não foi possível cachear Parquet: {e}")
+                arr = np.load(p)
+                # flatten 1D arrays
+                arr = np.asarray(arr).reshape(-1)
+                series[series_id] = arr
+            except Exception:
+                # skip unreadable files
+                raise
+        return series
 
-        if verbose:
-            logging.info(f"Dataset: treino {df_train.shape}, teste {df_test.shape}")
+    def _load_npy_dataset(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        train_series = self._load_npy_directory(self.train_dir)
+        test_series = self._load_npy_directory(self.test_dir)
 
-        return df_train, df_test
+        df_train_wide = self._series_to_wide(train_series)
+        df_test_wide = self._series_to_wide(test_series)
 
-    def _wide_to_darts_series(self, df: DataFrame, normalize=False) -> List[TimeSeries]:
-        """
-        Converte diretamente o DataFrame Wide do M4 em
-        uma lista de objetos Darts TimeSeries.
-        """
-        series_list = []
+        return df_train_wide, df_test_wide
 
-        # Iterando sobre cada linha (cada série temporal única do M4)
-        for series_id, row in df.iterrows():
-            # Remove valores nulos (o M4 wide preenche séries curtas com NaN no final)
-            clean_values = np.array(row.values)
+    def _wide_to_long(self, df: pd.DataFrame, include_labels: bool = False) -> pd.DataFrame:
+        if df.empty:
+            return pd.DataFrame(columns=["series_id", "time_idx", "target"])
 
-            if ProjectSettings.dataset.impute:
-                # TODO: Implementar imputacao de dados
-                pass
+        frame = df.copy()
+        frame.index = frame.index.astype(str)
+        frame.index.name = "series_id"
 
-            if len(clean_values) == 0:
-                continue
-
-            # Como o M4 original usa passos de tempo inteiros abstratos (V1, V2...),
-            # criamos um range numérico simples para o índice.
-            time_axis: np.ndarray[Tuple[int]] = np.arange(len(clean_values))
-            if normalize:
-                clean_values = StandardScaler().fit_transform(
-                    (clean_values).reshape(-1, 1)
-                )
-                # squeeze pra retransformar em array 1D
-                clean_values = clean_values.squeeze(axis=1)
-
-            # Cria o Dataframe individual esperado pelo Darts
-            single_ts_df = pd.DataFrame({"target": clean_values}, index=time_axis)
-
-            # Instancia o objeto TimeSeries do Darts
-            ts: TimeSeries = TimeSeries.from_dataframe(
-                single_ts_df,
-                value_cols="target",
-                time_col=None,  # Quando None, assume o índice do dataframe
-            )
-
-            # Adiciona metadados estáticos (opcional, útil para alguns modelos do Darts)
-            # ts = ts.with_static_covariates(pd.Series([series_id], index=["series_id"]))
-
-            series_list.append(ts)
-
-        return series_list
-
-    def build_dataset(self, normalize=False) -> None:
-
-        # No Darts, trabalhamos com List[TimeSeries] para múltiplas séries (Global Models)
-        self.train_series: List[TimeSeries] = self._wide_to_darts_series(
-            self.df_train_wide, normalize=normalize
+        long_df = frame.reset_index().melt(
+            id_vars="series_id", var_name="time_step", value_name="target"
         )
-        logging.info("SERIES DE TREINO CRIADAS!")
+        long_df["target"] = pd.to_numeric(long_df["target"], errors="coerce")
+        # extract integer index from column name like t1 -> 1
+        long_df["time_idx"] = long_df["time_step"].str.extract(r"(\d+)")[0].astype(int) - 1
 
-        # Validação: No Darts, a validação geralmente são os últimos 'output_width' pontos do treino
-        self.val_series: List[TimeSeries] = [
-            ts[-self.output_width :] for ts in self.train_series
-        ]
+        long_df = long_df.dropna(subset=["target"]).sort_values(["series_id", "time_idx"]).reset_index(drop=True)
 
-        logging.info("SERIES DE VALIDAÇÃO CRIADAS!")
+        if include_labels and not self.labels_df.empty:
+            # initialize flag
+            long_df["anomaly"] = False
+            # mark anomalies per series
+            for _, row in self.labels_df.iterrows():
+                sid = str(row["series_id"]).strip()
+                try:
+                    start = int(row["start"])
+                    end = int(row["end"])
+                except Exception:
+                    continue
+                # assume labeled file may be 1-based -> convert to 0-based
+                start_idx = max(0, start - 1)
+                end_idx = max(0, end - 1)
+                mask = (long_df["series_id"] == sid) & (long_df["time_idx"].between(start_idx, end_idx))
+                long_df.loc[mask, "anomaly"] = True
 
-        # Teste: O dataset de teste do M4 são os passos futuros reais
-        self.test_series: List[TimeSeries] = self._wide_to_darts_series(
-            self.df_test_wide, normalize=normalize
-        )
+        cols = ["series_id", "time_idx", "target"]
+        if include_labels:
+            cols.append("anomaly")
 
-        # ---#
+        return long_df[cols]
 
-        self.train_dataset = SequentialTorchTrainingDataset(
-            series=self.train_series,
-            input_chunk_length=self.input_width,
-            output_chunk_length=self.output_width,
+    # Minimal compatibility wrappers used by the datamodule
+    def _build_dataset(self, data: pd.DataFrame) -> TimeSeriesDataSet:
+        if data.isnull().values.any():
+            raise Exception("TEM NAN! ")
+
+        return TimeSeriesDataSet(
+            data,
+            time_idx="time_idx",
+            target="target",
+            group_ids=["series_id"],
+            time_varying_known_reals=["time_idx"],
+            time_varying_unknown_reals=["target"],
+            max_encoder_length=self.input_width,
+            min_encoder_length=self.input_width,
+            max_prediction_length=self.output_width,
+            min_prediction_length=self.output_width,
+            target_normalizer=self.series_normalizer,
+            add_relative_time_idx=False,
+            add_target_scales=False,
+            add_encoder_length=True,
+            allow_missing_timesteps=False,
+            randomize_length=None,
         )
 
-        self.val_dataset = SequentialTorchInferenceDataset(
-            series=self.val_series,
-            input_chunk_length=self.input_width,
-            output_chunk_length=self.output_width,
-        )
-
-        self.test_dataset = SequentialTorchInferenceDataset(
-            series=self.test_series,
-            input_chunk_length=self.input_width,
-            output_chunk_length=self.output_width,
-        )
-
-    # Métodos para manter compatibilidade de assinatura externa se necessário
-    def build_train_dataset(self) -> SequentialTorchTrainingDataset:
+    def build_train_dataset(self) -> TimeSeriesDataSet:
+        self.train_dataset = self._build_dataset(self.df_train)
         return self.train_dataset
 
-    def build_validation_dataset(self) -> SequentialTorchInferenceDataset:
-        return self.val_dataset
+    def build_validation_dataset(self, train_dataset: TimeSeriesDataSet) -> TimeSeriesDataSet:
+        return TimeSeriesDataSet.from_dataset(
+            train_dataset,
+            self.df_train,
+            predict=True,
+            stop_randomization=True,
+        )
 
-    def build_test_dataset(self) -> SequentialTorchInferenceDataset:
-        return self.test_dataset
+    def build_test_dataset(self, train_dataset: TimeSeriesDataSet) -> TimeSeriesDataSet:
+        # create evaluation frame by concatenating train+test for matching series
+        frames = []
+        for series_id, train_group in self.df_train.groupby("series_id", sort=False):
+            test_group = self.df_test[self.df_test["series_id"] == series_id]
+            if test_group.empty:
+                continue
+
+            test_group = test_group.copy()
+            start_idx = int(train_group["time_idx"].max()) + 1
+            test_group["time_idx"] = range(start_idx, start_idx + len(test_group))
+            frames.append(pd.concat([train_group, test_group], ignore_index=True))
+
+        if not frames:
+            raise ValueError("Nenhuma série encontrada para avaliação.")
+
+        evaluation_frame = (
+            pd.concat(frames, ignore_index=True)
+            .sort_values(["series_id", "time_idx"]) 
+            .reset_index(drop=True)
+        )
+
+        return TimeSeriesDataSet.from_dataset(
+            train_dataset,
+            evaluation_frame,
+            predict=True,
+            stop_randomization=True,
+        )
