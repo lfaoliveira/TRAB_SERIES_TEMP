@@ -12,7 +12,7 @@ from pytorch_forecasting.data import GroupNormalizer
 from src.data.torch_dataset import Horizons
 
 
-class StrokeDataset:
+class NasaDataset:
     """Loads telemetry .npy time series and labeled anomalies for outlier detection.
 
     Exposes the same minimal interface used by the existing datamodule:
@@ -50,7 +50,6 @@ class StrokeDataset:
         self.test_dataset = None
         self.val_dataset = None
 
-
     def _read_labels(self) -> pd.DataFrame:
         """Reads labeled_anomalies.csv if present and returns a DataFrame.
 
@@ -68,7 +67,7 @@ class StrokeDataset:
         if not set(["series_id", "start", "end"]).issubset(df.columns):
             return pd.DataFrame(columns=["series_id", "start", "end"])
 
-        df = df[ ["series_id", "start", "end"] ].copy()
+        df = df[["series_id", "start", "end"]].copy()
         df["start"] = pd.to_numeric(df["start"], errors="coerce").astype("Int64")
         df["end"] = pd.to_numeric(df["end"], errors="coerce").astype("Int64")
         return df.dropna()
@@ -85,17 +84,17 @@ class StrokeDataset:
         max_len = max(len(v) for v in series_dict.values())
         data = {}
         for series_id, arr in series_dict.items():
-                data[series_id] = pd.Series(arr)
-            
+            data[series_id] = pd.Series(arr)
 
         # DataFrame with columns as series_ids and rows as time steps; we want
         # index=series_id and columns=time steps -> transpose
         df = pd.DataFrame(data)
         df = df.T
         # Set ordered integer column names
-        df.columns = [f"t{idx+1}" for idx in range(df.shape[1])]
+        df.columns = [f"t{idx + 1}" for idx in range(df.shape[1])]
         df.index.name = "series_id"
         return df
+
     def _load_npy_directory(self, directory: Path) -> Dict[str, np.ndarray]:
         """Reads all .npy files in a directory and returns a dict series_id->array."""
         series: Dict[str, np.ndarray] = {}
@@ -123,7 +122,9 @@ class StrokeDataset:
 
         return df_train_wide, df_test_wide
 
-    def _wide_to_long(self, df: pd.DataFrame, include_labels: bool = False) -> pd.DataFrame:
+    def _wide_to_long(
+        self, df: pd.DataFrame, include_labels: bool = False
+    ) -> pd.DataFrame:
         if df.empty:
             return pd.DataFrame(columns=["series_id", "time_idx", "target"])
 
@@ -136,9 +137,15 @@ class StrokeDataset:
         )
         long_df["target"] = pd.to_numeric(long_df["target"], errors="coerce")
         # extract integer index from column name like t1 -> 1
-        long_df["time_idx"] = long_df["time_step"].str.extract(r"(\d+)")[0].astype(int) - 1
+        long_df["time_idx"] = (
+            long_df["time_step"].str.extract(r"(\d+)")[0].astype(int) - 1
+        )
 
-        long_df = long_df.dropna(subset=["target"]).sort_values(["series_id", "time_idx"]).reset_index(drop=True)
+        long_df = (
+            long_df.dropna(subset=["target"])
+            .sort_values(["series_id", "time_idx"])
+            .reset_index(drop=True)
+        )
 
         if include_labels and not self.labels_df.empty:
             # initialize flag
@@ -154,7 +161,9 @@ class StrokeDataset:
                 # assume labeled file may be 1-based -> convert to 0-based
                 start_idx = max(0, start - 1)
                 end_idx = max(0, end - 1)
-                mask = (long_df["series_id"] == sid) & (long_df["time_idx"].between(start_idx, end_idx))
+                mask = (long_df["series_id"] == sid) & (
+                    long_df["time_idx"].between(start_idx, end_idx)
+                )
                 long_df.loc[mask, "anomaly"] = True
 
         cols = ["series_id", "time_idx", "target"]
@@ -191,7 +200,9 @@ class StrokeDataset:
         self.train_dataset = self._build_dataset(self.df_train)
         return self.train_dataset
 
-    def build_validation_dataset(self, train_dataset: TimeSeriesDataSet) -> TimeSeriesDataSet:
+    def build_validation_dataset(
+        self, train_dataset: TimeSeriesDataSet
+    ) -> TimeSeriesDataSet:
         return TimeSeriesDataSet.from_dataset(
             train_dataset,
             self.df_train,
@@ -217,7 +228,7 @@ class StrokeDataset:
 
         evaluation_frame = (
             pd.concat(frames, ignore_index=True)
-            .sort_values(["series_id", "time_idx"]) 
+            .sort_values(["series_id", "time_idx"])
             .reset_index(drop=True)
         )
 
