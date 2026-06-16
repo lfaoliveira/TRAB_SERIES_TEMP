@@ -7,7 +7,11 @@ import numpy as np
 import pandas as pd
 
 from src.config.config import ProjectSettings
-from pytorch_forecasting import TimeSeriesDataSet
+from darts import TimeSeries
+from darts.utils.data import (
+    SequentialTorchTrainingDataset,
+    SequentialTorchInferenceDataset,
+)
 from pytorch_forecasting.data import GroupNormalizer
 from src.data.torch_dataset import Horizons
 
@@ -122,9 +126,7 @@ class NasaDataset:
 
         return df_train_wide, df_test_wide
 
-    def _wide_to_long(
-        self, df: pd.DataFrame, include_labels: bool = False
-    ) -> pd.DataFrame:
+    def _wide_to_long(self, df: pd.DataFrame, include_labels: bool = False) -> pd.DataFrame:
         if df.empty:
             return pd.DataFrame(columns=["series_id", "time_idx", "target"])
 
@@ -137,9 +139,7 @@ class NasaDataset:
         )
         long_df["target"] = pd.to_numeric(long_df["target"], errors="coerce")
         # extract integer index from column name like t1 -> 1
-        long_df["time_idx"] = (
-            long_df["time_step"].str.extract(r"(\d+)")[0].astype(int) - 1
-        )
+        long_df["time_idx"] = long_df["time_step"].str.extract(r"(\d+)")[0].astype(int) - 1
 
         long_df = (
             long_df.dropna(subset=["target"])
@@ -200,9 +200,7 @@ class NasaDataset:
         self.train_dataset = self._build_dataset(self.df_train)
         return self.train_dataset
 
-    def build_validation_dataset(
-        self, train_dataset: TimeSeriesDataSet
-    ) -> TimeSeriesDataSet:
+    def build_validation_dataset(self, train_dataset: TimeSeriesDataSet) -> TimeSeriesDataSet:
         return TimeSeriesDataSet.from_dataset(
             train_dataset,
             self.df_train,
