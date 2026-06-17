@@ -80,9 +80,7 @@ def rolling_window_apply(
     for series in series_list:
         s = pd.Series(series.univariate_values(), dtype=float)
 
-        rolling = s.rolling(
-            window=window_size, step=step, min_periods=window_size, center=True
-        )
+        rolling = s.rolling(window=window_size, step=step, min_periods=window_size, center=True)
         for rol in rolling:
             print(rol)
         # raw=False → pd.Series  # pd.NA para janelas incompletas
@@ -148,10 +146,7 @@ if __name__ == "__main__":
 
     print("\n=== std < 2 (sem padding manual) ===")
     pprint.pprint(
-        [
-            r.tolist()
-            for r in rolling_window_apply(series_list, WINDOW, any_above, overlap=False)
-        ]
+        [r.tolist() for r in rolling_window_apply(series_list, WINDOW, any_above, overlap=False)]
     )
 
     # print("\n=== lambda inline: último > primeiro ===")
@@ -276,9 +271,7 @@ class STLHampelOutlierDetector(OutlierDetector):
 
     def __init__(self, period=None, window_size=10, n_sigmas=3):
         self.period = period
-        self.hampel = HampelFilterOutlierDetector(
-            window_size=window_size, n_sigmas=n_sigmas
-        )
+        self.hampel = HampelFilterOutlierDetector(window_size=window_size, n_sigmas=n_sigmas)
 
     def detect(self, data):
         """
