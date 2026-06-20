@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from pathlib import Path
 import traceback
@@ -41,7 +43,7 @@ class NasaDataset:
         build_test_dataset(train_dataset)
 
     Useful attributes after __init__:
-    df_train  – long-format DataFrame with columns [series_id, time_idx, target, *features]
+    df_train  – long-format DataFrame with columns [series_id, time_idx, target, feat_0]
     df_test   – idem, plus an "anomaly" boolean column
     labels_df – parsed anomaly labels with columns
         [chan_id, spacecraft, class, seq_start, seq_end] (one row per sequence)
@@ -51,6 +53,8 @@ class NasaDataset:
         self.verbose = verbose
         base_path.mkdir(parents=True, exist_ok=True)
         self.labels_file = base_path / "labeled_anomalies.csv"
+
+        self.telemetry_column = "feat_0"
 
         prototype = ProjectSettings.run_mode == "prototype"
 
@@ -65,11 +69,11 @@ class NasaDataset:
             self.labels_df[:10_000].to_csv("./labels.csv")
 
         # Convert to long format -----------------------------------------------
-        self.df_test = self.multi_to_df(test_wide, include_labels=True)
+        self.df_test, self.tam_dataset = self.multi_to_df(test_wide, include_labels=True)
         if prototype:
             self.df_test[:10_000].to_csv("./test.csv")
 
-        # Get feature columns (all columns except time_idx, target, anomaly) ---
+        # Get feature columns == feat_0 column ---
         self.feature_cols = [
             col for col in self.df_test.columns if col not in ["series_id", "time_idx", "target"]
         ]
@@ -157,7 +161,7 @@ class NasaDataset:
         """Read every .npy file in *directory*.
 
         Each file must contain an array of shape (n_timesteps,) or
-        (n_features, n_timesteps).  1-D arrays are expanded to (n_timesteps, 1).
+        (1, n_timesteps).
         Returns a DataFrame with MultiIndex (series_id, feature_id, time_idx ).
         """
         if not directory.exists():
@@ -171,16 +175,17 @@ class NasaDataset:
             n_timesteps, n_features = arr.shape
 
             # Build records with MultiIndex structure
-            for f in range(n_features):
-                for t in range(n_timesteps):
-                    records.append(
-                        {
-                            "series_id": chan_id,
-                            "feature_id": f"feat_{f}",
-                            "time_idx": t,
-                            "value": arr[t, f],
-                        }
-                    )
+            f = 0
+            # AVISO: NO DATASET, APENAS O PRIMEIRO CANAL É TELEMETRIA!
+            for t in range(n_timesteps):
+                records.append(
+                    {
+                        "series_id": chan_id,
+                        "feature_id": f"feat_{f}",
+                        "time_idx": t,
+                        "value": arr[t, f],
+                    }
+                )
 
             if prototype:
                 logging.info(f"  Loaded (prototype): {chan_id}  shape={arr.shape}")
@@ -245,10 +250,10 @@ class NasaDataset:
 
     def multi_to_df(
         self, df_multi: pd.DataFrame, include_labels: bool = False, drop=True
-    ) -> pd.DataFrame:
+    ) -> tuple[pd.DataFrame, tuple[int, int]]:
         """Converte o DataFrame MultiIndex para o formato final desejado:
 
-        time_idx | target | feat_1 | feat_2 | ...
+        time_idx | target | feat_0
         """
         if drop:
             row_all_nan = (
@@ -258,7 +263,9 @@ class NasaDataset:
             # deixa apenas os time_idx que NÃO são totalmente compostos por NaN
             df_multi = df_multi[~row_all_nan]
 
-        # 1. Faz o unstack para trazer os 'feat_x' para as colunas
+        tam_dataset = df_multi.shape
+
+        # 1. Faz o unstack para trazer o 'feat_0' para as colunas
         df_wide = df_multi["value"].unstack(level="feature_id")
 
         # 3. Reseta o índice para mover 'series_id' e 'time_idx' de volta como colunas comuns
@@ -300,7 +307,7 @@ class NasaDataset:
                     lambda x: anomaly_array[x] if x <= max_time_idx else np.nan
                 )
 
-        return df_wide
+        return df_wide, tam_dataset
 
     # ------------------------------------------------------------------
     # TimeSeriesDataSet builders
@@ -321,11 +328,24 @@ class NasaDataset:
     def build_test_dataset(
         self,
     ) -> list[TimeSeries]:
-        """Build the test TimeSeriesDataSet."""
+        """Build the test TimeSeries using the same telemetry features as train."""
         self.test_dataset = TimeSeries.from_group_dataframe(
             self.df_test,
             group_cols="series_id",
             time_col="time_idx",
-            value_cols=["target"],
+            value_cols=self.feature_cols,
         )
         return self.test_dataset
+
+    def build_test_labels(self) -> list[np.ndarray]:
+        """Return the ground-truth anomaly labels (0/1) per series as a list of 1-D arrays.
+
+        Each array has length equal to the number of time steps of that series
+        in df_test, perfectly aligned with the series returned by
+        ``build_test_dataset``.
+        """
+        labels_list = []
+        for series_id, group in self.df_test.groupby("series_id", sort=False):
+            group = group.sort_values("time_idx")
+            labels_list.append(group["target"].values.astype(np.float64))
+        return labels_list

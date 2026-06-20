@@ -16,3 +16,4 @@ data/*
 export/
 output/
 .install_complete
+.ruff_cache
