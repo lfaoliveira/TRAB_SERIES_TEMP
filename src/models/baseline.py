@@ -1,44 +1,17 @@
+import logging
 from typing import Any, Callable, List
-
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import average_precision_score, roc_auc_score
 from statsmodels.tsa.seasonal import STL
 from darts.ad.detectors import QuantileDetector
 from darts import TimeSeries
 from abc import ABC, abstractmethod
+from darts.ad.scorers import KMeansScorer
 
 
 type WindowPredicate = Callable[[np.ndarray, Any], pd.Series[bool]]
-
-
-class OutlierDetector(ABC):
-    def __init__(
-        self, group_id: str = "series_id", target_id: str = "target", window_size=7
-    ) -> None:
-        super().__init__()
-        self.window_size = window_size
-        self.group_id = group_id
-        self.target_id = target_id
-
-    @abstractmethod
-    def detect(self, data: pd.DataFrame) -> pd.DataFrame:
-        pass
-
-    """
-rolling_window_pandas.py
-------------------------
-Versão com Pandas do rolling_window_apply.
-Muito mais simples: pd.Series.rolling() cuida de janelas, padding e alinhamento.
-"""
-
-
-# input: Pd.Series, output: bool
-
-
-# ---------------------------------------------------------------------------
-# Core function
-# ---------------------------------------------------------------------------
 
 
 def rolling_window_apply(
@@ -91,11 +64,6 @@ def rolling_window_apply(
     return results
 
 
-# ---------------------------------------------------------------------------
-# Predicate factories (mesmo contrato da versão anterior)
-# ---------------------------------------------------------------------------
-
-
 # TODO: adaptar funcoes para que retornem array de booleanos contendo se elemento da janela eh oulier ou nao
 def threshold_mean(threshold: float) -> WindowPredicate:
     return lambda w: w.mean() > threshold
@@ -114,6 +82,37 @@ def is_monotone_increasing() -> WindowPredicate:
 
 def std_below(max_std: float) -> WindowPredicate:
     return lambda w: w.std() < max_std
+
+
+class OutlierDetector(ABC):
+    # NOTE: COMENTADO POIS NEM TODOS MODELOS USAM JANELAMENTO!
+    # def __init__(
+    #     self, group_id: str = "series_id", target_id: str = "target", window_size=7
+    # ) -> None:
+    #     super().__init__()
+    #     self.window_size = window_size
+    #     self.group_id = group_id
+    #     self.target_id = target_id
+
+    def apply(
+        self, train: list[TimeSeries], test: list[TimeSeries], test_labels: np.ndarray
+    ) -> list[Any]:
+        self.train(train)
+        scores = self.test_scorer(test)
+        metrics = self.metrics(test_labels, scores)
+        return metrics
+
+    @abstractmethod
+    def train(self, train: list[TimeSeries]):
+        pass
+
+    @abstractmethod
+    def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
+        pass
+
+    @abstractmethod
+    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]) -> list[Any]:
+        pass
 
 
 # ---------------------------------------------------------------------------
