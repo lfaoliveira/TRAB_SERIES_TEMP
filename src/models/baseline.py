@@ -9,6 +9,7 @@ from darts.ad.detectors import QuantileDetector
 from darts import TimeSeries
 from abc import ABC, abstractmethod
 from darts.ad.scorers import KMeansScorer
+from darts.models import TCNModel
 
 
 type WindowPredicate = Callable[[np.ndarray, Any], pd.Series[bool]]
@@ -145,6 +146,8 @@ class KMeans(OutlierDetector):
         self.scorer.fit(train)
 
     def test_scorer(self, test: list[TimeSeries]):
+        if self.scorer is None:
+            raise RuntimeError("KalmanFilter must be trained before scoring.")
 
         scores: list[TimeSeries] = [self.scorer.score(ts) for ts in test]
         return scores
@@ -223,6 +226,7 @@ class Hampel(OutlierDetector):
         |x_i - mediana_local| / sigma_local.
         Quanto maior o escore, mais anômalo o ponto.
         """
+
         scores: list[TimeSeries] = []
         k = self.window_size // 2
 
@@ -264,29 +268,91 @@ class Hampel(OutlierDetector):
         return [auc_roc, auc_pr]
 
 
-
-class STLHampelOutlierDetector(OutlierDetector):
+class Kalman(OutlierDetector):
     """
-    Outlier detection using STL Decomposition followed by a Hampel Filter on the residuals.
-    Useful for seasonal data where outliers are defined as anomalies in the residual component.
+    Outlier detection using a TCN forecasting model.
+    A TCN is trained on the train series, then anomaly scores are computed as the
+    absolute residual |observation - forecast| from historical_forecasts.
     """
 
-    def __init__(self, period=None, window_size=10, n_sigmas=3):
-        self.period = period
-        self.hampel = HampelFilterOutlierDetector(window_size=window_size, n_sigmas=n_sigmas)
+    def __init__(
+        self,
+        input_chunk_length: int = 12,
+        output_chunk_length: int = 1,
+        kernel_size: int = 3,
+        num_filters: int = 6,
+        num_layers: int | None = None,
+        dropout: float = 0.2,
+        n_epochs: int = 20,
+        batch_size: int = 32,
+        **kwargs,
+    ):
+        super().__init__()
+        self.input_chunk_length = input_chunk_length
+        self.output_chunk_length = output_chunk_length
+        self.kernel_size = kernel_size
+        self.num_filters = num_filters
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.n_epochs = n_epochs
+        self.batch_size = batch_size
+        self.kwargs = kwargs
+        self.model: TCNModel | None = None
 
-    def detect(self, data):
-        """
-        Detect outliers in the data.
-        Returns a boolean array where True indicates an outlier.
-        """
-        # Ensure data is a pandas Series for STL
-        if not isinstance(data, pd.Series):
-            data = pd.Series(data)
+    def train(self, train: list[TimeSeries]):
+        if not train:
+            return
+        self.model = TCNModel(
+            input_chunk_length=self.input_chunk_length,
+            output_chunk_length=self.output_chunk_length,
+            kernel_size=self.kernel_size,
+            num_filters=self.num_filters,
+            num_layers=self.num_layers,
+            dropout=self.dropout,
+            n_epochs=self.n_epochs,
+            batch_size=self.batch_size,
+            **self.kwargs,
+        )
+        self.model.fit(train, verbose=False)
 
-        # STL decomposition: data = trend + seasonal + resid
-        stl = STL(data, period=self.period).fit()
-        resid = stl.resid
+    def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
+        if self.model is None:
+            raise RuntimeError("TCNModel must be trained before scoring.")
 
-        # Apply Hampel filter to the residual component
-        return self.hampel.detect(resid.values)
+        scores: list[TimeSeries] = []
+        for ts in test:
+            # historical_forecasts com retrain=False usa o modelo pré-treinado
+            pred = self.model.historical_forecasts(
+                ts,
+                forecast_horizon=self.output_chunk_length,
+                stride=1,
+                retrain=False,
+                last_points_only=True,
+                verbose=False,
+            )
+            obs = ts.values(copy=False).flatten()
+            est = pred.values(copy=False).flatten()
+            # ponytail: alinha pelo fim se houver warmup do input_chunk_length
+            if len(est) < len(obs):
+                obs = obs[-len(est) :]
+            residual = np.abs(obs - est)
+            scores.append(TimeSeries.from_values(residual))
+
+        return scores
+
+    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]):
+        y_true = []
+        y_score = []
+        for labels, score in zip(test_labels, scores):
+            score_vals = score.values(copy=False).flatten()
+            n_warmup = len(labels) - len(score_vals)
+            labels_aligned = labels[n_warmup:] if n_warmup > 0 else labels
+            y_true.extend(labels_aligned)
+            y_score.extend(score_vals)
+
+        auc_roc = roc_auc_score(y_true, y_score)
+        auc_pr = average_precision_score(y_true, y_score)
+
+        logging.info("AUC-ROC: {auc_roc:.4f}")
+        logging.info("AUC-PR : {auc_pr:.4f}")
+        return [auc_roc, auc_pr]
