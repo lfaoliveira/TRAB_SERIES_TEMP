@@ -116,50 +116,11 @@ class OutlierDetector(ABC):
 
 
 # ---------------------------------------------------------------------------
-# Demo
+# Predicate factories (mesmo contrato da versão anterior)
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    import pprint
 
-    series_list: List[TimeSeries] = [
-        [1, 3, 5, 7, 6, 4, 2],
-        [10, 2, 2, 2, 2, 2, 10],
-        [1, 2, 3, 4, 5, 6, 7],
-    ]
-
-    WINDOW = 3
-
-    # print("=== mean > 4 (apenas janelas completas) ===")
-    # pprint.pprint(
-    #     [r.tolist() for r in rolling_window_apply(series_list, WINDOW, threshold_mean(4))]
-    # )
-
-    # print("\n=== monotone increasing ===")
-    # pprint.pprint(
-    #     [
-    #         r.tolist()
-    #         for r in rolling_window_apply(series_list, WINDOW, is_monotone_increasing())
-    #     ]
-    # )
-
-    print("\n=== std < 2 (sem padding manual) ===")
-    pprint.pprint(
-        [r.tolist() for r in rolling_window_apply(series_list, WINDOW, any_above, overlap=False)]
-    )
-
-    # print("\n=== lambda inline: último > primeiro ===")
-    # pprint.pprint(
-    #     [
-    #         r.tolist()
-    #         for r in rolling_window_apply(
-    #             series_list, WINDOW, lambda w: w.iloc[-1] > w.iloc[0]
-    #         )
-    #     ]
-    # )
-
-
-class Quantile(OutlierDetector):
+class KMeans(OutlierDetector):
     """
     Outlier detection using the Z-Score method.
     Identifies points that are more than 'threshold' standard deviations away from the mean.
@@ -172,94 +133,136 @@ class Quantile(OutlierDetector):
         window_size=7,
         threshold: tuple[float, float] = (0.1, 0.1),
     ):
-        super().__init__(
-            target_id=target_id,
-            group_id=group_id,
-            window_size=window_size,
+        super().__init__()
+        self.scorer = KMeansScorer(
+            k=40,
+            window=600,
+            component_wise=False,
         )
         self.threshold = threshold
 
-    def previsao(data: list[TimeSeries]) -> pd.DataFrame:
-        threshold = 0.2
-        low, high = 0 + threshold, 1 - threshold
+    def train(self, train: list[TimeSeries]):
+        self.scorer.fit(train)
 
-        outlier_list = []
-        for idx, ts in enumerate(data):
-            detector = QuantileDetector(low, high)
-            outliers = detector.fit_detect(ts)
-            outlier_pd = outliers.values()
-            outlier_list.append({"id": idx, "series": outlier_pd})
+    def test_scorer(self, test: list[TimeSeries]):
 
-        is_outlier = pd.DataFrame(outlier_list)
-        is_outlier = is_outlier.fillna(0)
-        bool_outlier = is_outlier[is_outlier == 1]
+        scores: list[TimeSeries] = [self.scorer.score(ts) for ts in test]
+        return scores
 
-        return bool_outlier
+    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]):
+        y_true = []
+        y_score = []
+        for labels, score in zip(test_labels, scores):
+            score_vals = score.values(copy=False).flatten()
+            # O score tem window-1 valores a menos que os labels no início
+            # (as primeiras window-1 posições não formam uma janela completa)
+            n_warmup = len(labels) - len(score_vals)
+            labels_aligned = labels[n_warmup:]
+            assert len(labels_aligned) == len(score_vals), (
+                f"labels {len(labels_aligned)} != scores {len(score_vals)} (warmup={n_warmup})"
+            )
+            y_true.extend(labels_aligned)
+            y_score.extend(score_vals)
 
-    def detect(self, data: list[TimeSeries]) -> pd.DataFrame:
-        """
-        Detect outliers in the data.
-        Returns a boolean array where True indicates an outlier.
+        logging.info(
+            "SHAPES — y_true: {np.array(y_true).shape}, y_score: {np.array(y_score).shape}"
+        )
+        auc_roc = roc_auc_score(y_true, y_score)
+        auc_pr = average_precision_score(y_true, y_score)
 
-        """
-        threshold = 0.2
-        low, high = 0 + threshold, 1 - threshold
+        logging.info("AUC-ROC: {auc_roc:.4f}")
+        logging.info("AUC-PR : {auc_pr:.4f}")
+        return [auc_roc, auc_pr]
 
-        outlier_list = []
-        for idx, ts in enumerate(data):
-            detector = QuantileDetector(low, high)
-            outliers = detector.fit_detect(ts)
-            outlier_pd = outliers.values()
-            outlier_list.append({"id": idx, "series": outlier_pd})
+    # #AVISO: LEGACY
+    # def detect(self, data: list[TimeSeries]) -> pd.DataFrame:
+    #     """
+    #     Detect outliers in the data.
+    #     Returns a boolean array where True indicates an outlier.
 
-        is_outlier = pd.DataFrame(outlier_list)
-        is_outlier = is_outlier.fillna(0)
+    #     """
+    #     threshold = 0.2
+    #     low, high = 0 + threshold, 1 - threshold
 
-        outlier_df = pd.DataFrame(outlier_list)
-        is_outlier = df_target.abs() > self.threshold
-        is_outlier = is_outlier.fillna(False)
+    #     outlier_list = []
+    #     for idx, ts in enumerate(data):
+    #         detector = QuantileDetector(low, high)
+    #         outliers = detector.fit_detect(ts)
+    #         outlier_pd = outliers.values()
+    #         outlier_list.append({"id": idx, "series": outlier_pd})
 
-        return pd.DataFrame(is_outlier)
+    #     is_outlier = pd.DataFrame(outlier_list)
+    #     is_outlier = is_outlier.fillna(0)
+
+    #     outlier_df = pd.DataFrame(outlier_list)
+    #     is_outlier = df_target.abs() > self.threshold
+    #     is_outlier = is_outlier.fillna(False)
+
+    #     return pd.DataFrame(is_outlier)
 
 
-class HampelFilterOutlierDetector(OutlierDetector):
+class Hampel(OutlierDetector):
     """
-    Outlier detection using the Hampel Filter.
-    Uses a sliding window to identify points that differ significantly from the local median.
+    Outlier detection using the Hampel Filter, adaptado para a interface OutlierDetector.
+    Usa uma janela deslizante para computar escores de anomalia baseados no desvio
+    absoluto em relação à mediana local, escalado pelo MAD (Median Absolute Deviation).
     """
 
     def __init__(self, window_size=10, n_sigmas=3):
+        super().__init__()
         self.window_size = window_size
         self.n_sigmas = n_sigmas
 
-    def detect(self, data: pd.DataFrame):
-        """
-        Detect outliers in the data.
-        Returns a boolean array where True indicates an outlier.
-        """
-        data = np.array(data)
-        n = len(data)
-        outliers = np.zeros(n, dtype=bool)
+    def train(self, train: list[TimeSeries]):
+        # Filtro de Hampel é não-supervisionado e sem estado — nada a treinar
+        pass
 
-        # Half window size
+    def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
+        """
+        Para cada TimeSeries, computa um escore contínuo de anomalia:
+        |x_i - mediana_local| / sigma_local.
+        Quanto maior o escore, mais anômalo o ponto.
+        """
+        scores: list[TimeSeries] = []
         k = self.window_size // 2
 
-        for i in range(n):
-            # Define window boundaries
-            start = max(0, i - k)
-            end = min(n, i + k + 1)
-            window = data[start:end]
+        for ts in test:
+            data = np.asarray(ts.univariate_values(), dtype=float)
+            n = len(data)
+            score_vals = np.zeros(n, dtype=float)
 
-            median = np.median(window)
-            mad = np.median(np.abs(window - median))
+            for i in range(n):
+                start = max(0, i - k)
+                end = min(n, i + k + 1)
+                window = data[start:end]
 
-            # Scale factor for MAD to approximate standard deviation for normal distribution
-            sigma = 1.4826 * mad
+                median = np.median(window)
+                mad = np.median(np.abs(window - median))
+                sigma = 1.4826 * mad
 
-            if np.abs(data[i] - median) > self.n_sigmas * sigma:
-                outliers[i] = True
+                # ponytail: se sigma == 0 (janela constante), score é 0
+                score_vals[i] = np.abs(data[i] - median) / sigma if sigma > 0 else 0.0
 
-        return outliers
+            scores.append(TimeSeries.from_values(score_vals))
+
+        return scores
+
+    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]):
+        y_true = []
+        y_score = []
+        for labels, score in zip(test_labels, scores):
+            score_vals = score.values(copy=False).flatten()
+            # Hampel produz score para todo ponto (mesmo comprimento dos labels)
+            y_true.extend(labels)
+            y_score.extend(score_vals)
+
+        auc_roc = roc_auc_score(y_true, y_score)
+        auc_pr = average_precision_score(y_true, y_score)
+
+        logging.info("AUC-ROC: {auc_roc:.4f}")
+        logging.info("AUC-PR : {auc_pr:.4f}")
+        return [auc_roc, auc_pr]
+
 
 
 class STLHampelOutlierDetector(OutlierDetector):
