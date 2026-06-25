@@ -136,7 +136,7 @@ class KMeans(OutlierDetector):
     ):
         super().__init__()
         self.scorer = KMeansScorer(
-            k=40,
+            k=10,
             window=600,
             component_wise=False,
         )
@@ -268,7 +268,7 @@ class Hampel(OutlierDetector):
         return [auc_roc, auc_pr]
 
 
-class Kalman(OutlierDetector):
+class TCN(OutlierDetector):
     """
     Outlier detection using a TCN forecasting model.
     A TCN is trained on the train series, then anomaly scores are computed as the
@@ -282,7 +282,7 @@ class Kalman(OutlierDetector):
         kernel_size: int = 3,
         num_filters: int = 6,
         num_layers: int | None = None,
-        dropout: float = 0.2,
+        dropout: float = 0.0,
         n_epochs: int = 20,
         batch_size: int = 32,
         **kwargs,
