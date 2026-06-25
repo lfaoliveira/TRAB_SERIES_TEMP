@@ -4,7 +4,11 @@ This file provides guidance to AI Agents when working with code in this reposito
 
 # The Project:
 
-This is a Machine Learning Project for a Masters Degree
+This is a Machine Learning Project for a Masters Degree, where I need to train and test Anomaly Detection Models in a dataset. Models need to be Naive (like Z-Score), baseline and Neural Network-based, with a scientific-paper-styled report produced, so I need the models to be well documented (preferably with sources), at the very least.
+
+I need a well defined and flawless data pipeline for the dataset and, beyond the normal model training flow in PyTorch Lightning / DARTS, a hyperparamter optimization step, where necessary.
+
+Experimental things should be in the main.ipynb file, where consolidated stuff parts of the code should be inside of `src`.
 
 # YOUR ROLE
 
