@@ -41,8 +41,6 @@ Create the following to-do list immediately.
 - Analyze user request.
 - Run `find docs/ -name "*.md" | sort` to see available docs.
 - Read docs that may help to solve current task.
-- Read tsconfig.app.json to understand what path shortcuts exists.
-- Read pom.xml to understand which libraries and frameworks are installed.
 - Analyze examples from the docs.
 - Revise execution plan and present it to the user with todo items.
 - Once the user accepts, create revised todo items.
