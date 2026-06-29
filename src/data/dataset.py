@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 import traceback
 from typing import Tuple
@@ -129,10 +130,15 @@ class NasaDataset:
                     logging.info(f"Baixando M4 via KaggleHub para {download_path}")
                 import kagglehub
 
-                kagglehub.dataset_download(
+                dataset_path = kagglehub.dataset_download(
                     "patrickfleith/nasa-anomaly-detection-dataset-smap-msl",
                     output_dir=str(download_path),
                 )
+                if os.environ["AMBIENTE"] == "KAGGLE":
+                    base_path = Path(dataset_path)
+                    base_path = base_path / "data" / "data"
+                    train_dir = base_path / "train"
+                    test_dir = base_path / "test"
 
                 if not train_dir.exists() or not test_dir.exists():
                     raise FileNotFoundError(f".npy DA NASA não encontrados em {base_path}")
