@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.distributions import Normal, kl_divergence
 import pytorch_lightning as pl
 
 
@@ -61,9 +62,10 @@ class VAE(pl.LightningModule):
         # Reconstruction loss (MSE)
         recon_loss = F.mse_loss(x_recon, x, reduction="sum")
 
-        # KL Divergence
-        # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        # KL Divergence: D_KL(q(z|x) || p(z)) onde p(z) = N(0, I)
+        q = Normal(mu, logvar.mul(0.5).exp())
+        p = Normal(0, 1)
+        kl_loss = kl_divergence(q, p).sum()
 
         loss = recon_loss + kl_loss
 
@@ -78,7 +80,9 @@ class VAE(pl.LightningModule):
         x_recon, mu, logvar = self.forward(x)
 
         recon_loss = F.mse_loss(x_recon, x, reduction="sum")
-        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        q = Normal(mu, logvar.mul(0.5).exp())
+        p = Normal(0, 1)
+        kl_loss = kl_divergence(q, p).sum()
         loss = recon_loss + kl_loss
 
         self.log("val_loss", loss, prog_bar=True)

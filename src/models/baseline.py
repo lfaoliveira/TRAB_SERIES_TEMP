@@ -4,13 +4,12 @@ from typing import Any, Callable, List
 import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
-from statsmodels.tsa.seasonal import STL
-from darts.ad.detectors import QuantileDetector
 from darts import TimeSeries
-from abc import ABC, abstractmethod
 from darts.ad.scorers import KMeansScorer
-from darts.models import TCNModel
-import torch
+from darts.models import SARIMA as DartsSARIMA
+import sklearn.ensemble
+
+from src.models.outlier import OutlierDetector
 
 
 type WindowPredicate = Callable[[np.ndarray, Any], pd.Series[bool]]
@@ -57,7 +56,7 @@ def rolling_window_apply(
 
         rolling = s.rolling(window=window_size, step=step, min_periods=window_size, center=True)
         for rol in rolling:
-            print(rol)
+            logging.info(rol)
         # raw=False → pd.Series  # pd.NA para janelas incompletas
         bool_series = rolling.apply(lambda w: predicate(w), raw=False).astype("boolean")
 
@@ -84,41 +83,6 @@ def is_monotone_increasing() -> WindowPredicate:
 
 def std_below(max_std: float) -> WindowPredicate:
     return lambda w: w.std() < max_std
-
-
-class OutlierDetector(ABC):
-    # NOTE: COMENTADO POIS NEM TODOS MODELOS USAM JANELAMENTO!
-    # def __init__(
-    #     self, group_id: str = "series_id", target_id: str = "target", window_size=7
-    # ) -> None:
-    #     super().__init__()
-    #     self.window_size = window_size
-    #     self.group_id = group_id
-    #     self.target_id = target_id
-
-    def apply(
-        self, train: list[TimeSeries], test: list[TimeSeries], test_labels: np.ndarray
-    ) -> list[Any]:
-        logging.info("TREINANDO ...")
-        self.train(train)
-        logging.info("TESTANDO ...")
-        scores = self.test_scorer(test)
-        logging.info("METRIFICANDO ...")
-        metrics = self.metrics(test_labels, scores)
-        logging.info("FINALIZADO!\n")
-        return metrics
-
-    @abstractmethod
-    def train(self, train: list[TimeSeries]):
-        pass
-
-    @abstractmethod
-    def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
-        pass
-
-    @abstractmethod
-    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]) -> list[Any]:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -181,32 +145,6 @@ class KMeans(OutlierDetector):
         logging.info(f"AUC-ROC: {auc_roc:.4f}")
         logging.info(f"AUC-PR : {auc_pr:.4f}")
         return [auc_roc, auc_pr]
-
-    # #AVISO: LEGACY
-    # def detect(self, data: list[TimeSeries]) -> pd.DataFrame:
-    #     """
-    #     Detect outliers in the data.
-    #     Returns a boolean array where True indicates an outlier.
-
-    #     """
-    #     threshold = 0.2
-    #     low, high = 0 + threshold, 1 - threshold
-
-    #     outlier_list = []
-    #     for idx, ts in enumerate(data):
-    #         detector = QuantileDetector(low, high)
-    #         outliers = detector.fit_detect(ts)
-    #         outlier_pd = outliers.values()
-    #         outlier_list.append({"id": idx, "series": outlier_pd})
-
-    #     is_outlier = pd.DataFrame(outlier_list)
-    #     is_outlier = is_outlier.fillna(0)
-
-    #     outlier_df = pd.DataFrame(outlier_list)
-    #     is_outlier = df_target.abs() > self.threshold
-    #     is_outlier = is_outlier.fillna(False)
-
-    #     return pd.DataFrame(is_outlier)
 
 
 class Hampel(OutlierDetector):
@@ -273,72 +211,47 @@ class Hampel(OutlierDetector):
         return [auc_roc, auc_pr]
 
 
-class TCN(OutlierDetector):
+class SARIMA(OutlierDetector):
     """
-    Outlier detection using a TCN forecasting model.
-    A TCN is trained on the train series, then anomaly scores are computed as the
+    Outlier detection using a SARIMA forecasting model via darts.
+    A SARIMA model is trained per series, then anomaly scores are computed as the
     absolute residual |observation - forecast| from historical_forecasts.
     """
 
     def __init__(
         self,
-        input_chunk_length: int = 12,
-        output_chunk_length: int = 1,
-        kernel_size: int = 3,
-        num_filters: int = 6,
-        num_layers: int | None = None,
-        dropout: float = 0.0,
-        n_epochs: int = 20,
-        batch_size: int = 32,
+        seasonal_order: tuple[int, int, int, int] = (1, 0, 0, 12),
+        order: tuple[int, int, int] = (1, 0, 0),
+        n_epochs: int = 10,
         **kwargs,
     ):
         super().__init__()
-        self.input_chunk_length = input_chunk_length
-        self.output_chunk_length = output_chunk_length
-        self.kernel_size = kernel_size
-        self.num_filters = num_filters
-        self.num_layers = num_layers
-        self.dropout = dropout
+        self.seasonal_order = seasonal_order
+        self.order = order
         self.n_epochs = n_epochs
-        self.batch_size = batch_size
         self.kwargs = kwargs
-        self.model: TCNModel | None = None
+        self.model: DartsSARIMA | None = None
 
     def train(self, train: list[TimeSeries]):
         if not train:
             return
-        # ponytail: usa 1 device só — devices=-1 spawna multiprocessing que toma
-        # SIGTERM em ambientes como Kaggle. devices=1 usa uma GPU sem subprocessos.
-        accel = "gpu" if torch.cuda.is_available() else "cpu"
-        devices = 1
-
-        self.model = TCNModel(
-            input_chunk_length=self.input_chunk_length,
-            output_chunk_length=self.output_chunk_length,
-            kernel_size=self.kernel_size,
-            num_filters=self.num_filters,
-            num_layers=self.num_layers,
-            dropout=self.dropout,
+        self.model = DartsSARIMA(
+            order=self.order,
+            seasonal_order=self.seasonal_order,
             n_epochs=self.n_epochs,
-            batch_size=self.batch_size,
-            pl_trainer_kwargs={
-                "accelerator": accel,
-                "devices": devices,
-            },
             **self.kwargs,
         )
         self.model.fit(train, verbose=False)
 
     def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
         if self.model is None:
-            raise RuntimeError("TCNModel must be trained before scoring.")
+            raise RuntimeError("SARIMA must be trained before scoring.")
 
         scores: list[TimeSeries] = []
         for ts in test:
-            # historical_forecasts com retrain=False usa o modelo pré-treinado
             pred = self.model.historical_forecasts(
                 ts,
-                forecast_horizon=self.output_chunk_length,
+                forecast_horizon=1,
                 stride=1,
                 retrain=False,
                 last_points_only=True,
@@ -346,7 +259,6 @@ class TCN(OutlierDetector):
             )
             obs = ts.values(copy=False).flatten()
             est = pred.values(copy=False).flatten()
-            # ponytail: alinha pelo fim se houver warmup do input_chunk_length
             if len(est) < len(obs):
                 obs = obs[-len(est) :]
             residual = np.abs(obs - est)
@@ -362,6 +274,102 @@ class TCN(OutlierDetector):
             n_warmup = len(labels) - len(score_vals)
             labels_aligned = labels[n_warmup:] if n_warmup > 0 else labels
             y_true.extend(labels_aligned)
+            y_score.extend(score_vals)
+
+        auc_roc = roc_auc_score(y_true, y_score)
+        auc_pr = average_precision_score(y_true, y_score)
+
+        logging.info(f"AUC-ROC: {auc_roc:.4f}")
+        logging.info(f"AUC-PR : {auc_pr:.4f}")
+        return [auc_roc, auc_pr]
+
+
+class IsolationForest(OutlierDetector):
+    """
+    Outlier detection using sklearn's IsolationForest with sliding window features.
+    Each window of `window_size` consecutive points becomes a feature vector;
+    the anomaly score for the center point of the window is the negated decision
+    function output (so higher = more anomalous).
+    """
+
+    def __init__(
+        self,
+        window_size: int = 20,
+        contamination: float | str = "auto",
+        n_estimators: int = 100,
+        random_state: int = 42,
+        **kwargs,
+    ):
+        super().__init__()
+        self.window_size = window_size
+        self.contamination = contamination
+        self.n_estimators = n_estimators
+        self.random_state = random_state
+        self.kwargs = kwargs
+        self.model: sklearn.ensemble.IsolationForest | None = None
+        self._n_features: int = 0
+
+    def train(self, train: list[TimeSeries]):
+        ws = self.window_size
+        X_train: list[np.ndarray] = []
+        for ts in train:
+            vals = ts.values(copy=False).flatten()
+            if len(vals) < ws:
+                continue
+            for i in range(len(vals) - ws + 1):
+                X_train.append(vals[i : i + ws])
+
+        if not X_train:
+            raise ValueError(f"Nenhuma janela de tamanho {ws} pôde ser extraída do treino.")
+
+        X = np.stack(X_train)
+        self._n_features = X.shape[1]
+
+        self.model = sklearn.ensemble.IsolationForest(
+            n_estimators=self.n_estimators,
+            contamination=self.contamination,
+            random_state=self.random_state,
+            **self.kwargs,
+        )
+        self.model.fit(X)
+
+    def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
+        if self.model is None:
+            raise RuntimeError("IsolationForest must be trained before scoring.")
+
+        ws = self.window_size
+        scores: list[TimeSeries] = []
+
+        for ts in test:
+            vals = ts.values(copy=False).flatten()
+            n = len(vals)
+            score_vals = np.full(n, 0.0, dtype=float)
+
+            if n < ws:
+                scores.append(TimeSeries.from_values(score_vals))
+                continue
+
+            half = ws // 2
+            for i in range(n):
+                start = max(0, i - half)
+                end = min(n, i + half + 1)
+                window = vals[start:end]
+                if len(window) < ws:
+                    pad_before = max(0, half - i)
+                    pad_after = max(0, (i + half + 1) - n)
+                    window = np.pad(window, (pad_before, pad_after), mode="edge")
+                score_vals[i] = -self.model.decision_function(window.reshape(1, -1)).item()
+
+            scores.append(TimeSeries.from_values(score_vals))
+
+        return scores
+
+    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]):
+        y_true = []
+        y_score = []
+        for labels, score in zip(test_labels, scores):
+            score_vals = score.values(copy=False).flatten()
+            y_true.extend(labels)
             y_score.extend(score_vals)
 
         auc_roc = roc_auc_score(y_true, y_score)
