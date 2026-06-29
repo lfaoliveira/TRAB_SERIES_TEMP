@@ -307,8 +307,10 @@ class TCN(OutlierDetector):
     def train(self, train: list[TimeSeries]):
         if not train:
             return
+        # ponytail: usa 1 device só — devices=-1 spawna multiprocessing que toma
+        # SIGTERM em ambientes como Kaggle. devices=1 usa uma GPU sem subprocessos.
         accel = "gpu" if torch.cuda.is_available() else "cpu"
-        devices = -1 if accel == "gpu" else 1
+        devices = 1
 
         self.model = TCNModel(
             input_chunk_length=self.input_chunk_length,
