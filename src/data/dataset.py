@@ -58,9 +58,7 @@ class NasaDataset:
         verbose=False,
     ) -> None:
         self.verbose = verbose
-        base_path.mkdir(parents=True, exist_ok=True)
         export_path.mkdir(parents=True, exist_ok=True)
-        self.labels_file = base_path / "labeled_anomalies.csv"
 
         self.telemetry_column = "feat_0"
 
@@ -105,6 +103,9 @@ class NasaDataset:
         self, base_path: Path, prototype: bool = False, skip_load=True
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Carrega os arquivos M4 em wide format e cachea em Parquet."""
+        base_path.mkdir(parents=True, exist_ok=True)
+        self.labels_file = base_path / "labeled_anomalies.csv"
+
         download_path = base_path
         base_path = base_path / "data" / "data"
         train_dir = base_path / "train"
@@ -139,6 +140,7 @@ class NasaDataset:
                     base_path = base_path / "data" / "data"
                     train_dir = base_path / "train"
                     test_dir = base_path / "test"
+                    self.labels_file = base_path / "labeled_anomalies.csv"
 
                 if not train_dir.exists() or not test_dir.exists():
                     raise FileNotFoundError(f".npy DA NASA não encontrados em {base_path}")
