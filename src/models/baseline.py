@@ -10,6 +10,7 @@ from darts import TimeSeries
 from abc import ABC, abstractmethod
 from darts.ad.scorers import KMeansScorer
 from darts.models import TCNModel
+import torch
 
 
 type WindowPredicate = Callable[[np.ndarray, Any], pd.Series[bool]]
@@ -306,6 +307,9 @@ class TCN(OutlierDetector):
     def train(self, train: list[TimeSeries]):
         if not train:
             return
+        accel = "gpu" if torch.cuda.is_available() else "cpu"
+        devices = -1 if accel == "gpu" else 1
+
         self.model = TCNModel(
             input_chunk_length=self.input_chunk_length,
             output_chunk_length=self.output_chunk_length,
@@ -315,7 +319,10 @@ class TCN(OutlierDetector):
             dropout=self.dropout,
             n_epochs=self.n_epochs,
             batch_size=self.batch_size,
-            pl_trainer_kwargs={"accelerator": "gpu", "devices": -1, "auto_select_gpus": True},
+            pl_trainer_kwargs={
+                "accelerator": accel,
+                "devices": devices,
+            },
             **self.kwargs,
         )
         self.model.fit(train, verbose=False)
