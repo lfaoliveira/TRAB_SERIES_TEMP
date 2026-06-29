@@ -135,12 +135,13 @@ class NasaDataset:
                     "patrickfleith/nasa-anomaly-detection-dataset-smap-msl",
                     output_dir=str(download_path),
                 )
+                logging.info(f"DATASET PATH: {dataset_path}")
                 if os.environ["AMBIENTE"] == "KAGGLE":
                     base_path = Path(dataset_path)
                     base_path = base_path / "data" / "data"
                     train_dir = base_path / "train"
                     test_dir = base_path / "test"
-                    self.labels_file = base_path / "labeled_anomalies.csv"
+                    self.labels_file = Path(dataset_path) / "labeled_anomalies.csv"
 
                 if not train_dir.exists() or not test_dir.exists():
                     raise FileNotFoundError(f".npy DA NASA não encontrados em {base_path}")
