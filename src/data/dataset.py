@@ -49,9 +49,16 @@ class NasaDataset:
         [chan_id, spacecraft, class, seq_start, seq_end] (one row per sequence)
     """
 
-    def __init__(self, base_path: Path, normalize: bool = False, verbose=False) -> None:
+    def __init__(
+        self,
+        base_path: Path,
+        normalize: bool = False,
+        export_path: Path = Path(".", "exports"),
+        verbose=False,
+    ) -> None:
         self.verbose = verbose
         base_path.mkdir(parents=True, exist_ok=True)
+        export_path.mkdir(parents=True, exist_ok=True)
         self.labels_file = base_path / "labeled_anomalies.csv"
 
         self.telemetry_column = "feat_0"
@@ -61,17 +68,17 @@ class NasaDataset:
         # Load raw numpy arrays ------------------------------------------------
         train_wide, test_wide = self.load_dataset(base_path, prototype=prototype, skip_load=True)
         if prototype:
-            test_wide[:10_000].to_csv("./test_wide.csv")
+            test_wide[:10_000].to_csv(export_path / "test_wide.csv")
 
         # Parse labels ---------------------------------------------------------
         self.labels_df = self._read_labels()
         if prototype:
-            self.labels_df[:10_000].to_csv("./labels.csv")
+            self.labels_df[:10_000].to_csv(export_path / "./labels.csv")
 
         # Convert to long format -----------------------------------------------
         self.df_test, self.tam_dataset = self.multi_to_df(test_wide, include_labels=True)
         if prototype:
-            self.df_test[:10_000].to_csv("./test.csv")
+            self.df_test[:10_000].to_csv(export_path / "./test.csv")
 
         # Get feature columns == feat_0 column ---
         self.feature_cols = [
