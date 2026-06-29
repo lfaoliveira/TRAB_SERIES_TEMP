@@ -98,9 +98,13 @@ class OutlierDetector(ABC):
     def apply(
         self, train: list[TimeSeries], test: list[TimeSeries], test_labels: np.ndarray
     ) -> list[Any]:
+        logging.info("TREINANDO ...")
         self.train(train)
+        logging.info("TESTANDO ...")
         scores = self.test_scorer(test)
+        logging.info("METRIFICANDO ...")
         metrics = self.metrics(test_labels, scores)
+        logging.info("FINALIZADO!\n")
         return metrics
 
     @abstractmethod
@@ -117,7 +121,7 @@ class OutlierDetector(ABC):
 
 
 # ---------------------------------------------------------------------------
-# Predicate factories (mesmo contrato da versão anterior)
+# Modelos
 # ---------------------------------------------------------------------------
 
 
@@ -147,7 +151,7 @@ class KMeans(OutlierDetector):
 
     def test_scorer(self, test: list[TimeSeries]):
         if self.scorer is None:
-            raise RuntimeError("KalmanFilter must be trained before scoring.")
+            raise RuntimeError("KMeans must be trained before scoring.")
 
         scores: list[TimeSeries] = [self.scorer.score(ts) for ts in test]
         return scores
@@ -173,8 +177,8 @@ class KMeans(OutlierDetector):
         auc_roc = roc_auc_score(y_true, y_score)
         auc_pr = average_precision_score(y_true, y_score)
 
-        logging.info("AUC-ROC: {auc_roc:.4f}")
-        logging.info("AUC-PR : {auc_pr:.4f}")
+        logging.info(f"AUC-ROC: {auc_roc:.4f}")
+        logging.info(f"AUC-PR : {auc_pr:.4f}")
         return [auc_roc, auc_pr]
 
     # #AVISO: LEGACY
@@ -263,8 +267,8 @@ class Hampel(OutlierDetector):
         auc_roc = roc_auc_score(y_true, y_score)
         auc_pr = average_precision_score(y_true, y_score)
 
-        logging.info("AUC-ROC: {auc_roc:.4f}")
-        logging.info("AUC-PR : {auc_pr:.4f}")
+        logging.info(f"AUC-ROC: {auc_roc:.4f}")
+        logging.info(f"AUC-PR : {auc_pr:.4f}")
         return [auc_roc, auc_pr]
 
 
@@ -311,6 +315,7 @@ class TCN(OutlierDetector):
             dropout=self.dropout,
             n_epochs=self.n_epochs,
             batch_size=self.batch_size,
+            pl_trainer_kwargs={"accelerator": "gpu", "devices": -1, "auto_select_gpus": True},
             **self.kwargs,
         )
         self.model.fit(train, verbose=False)
@@ -353,6 +358,6 @@ class TCN(OutlierDetector):
         auc_roc = roc_auc_score(y_true, y_score)
         auc_pr = average_precision_score(y_true, y_score)
 
-        logging.info("AUC-ROC: {auc_roc:.4f}")
-        logging.info("AUC-PR : {auc_pr:.4f}")
+        logging.info(f"AUC-ROC: {auc_roc:.4f}")
+        logging.info(f"AUC-PR : {auc_pr:.4f}")
         return [auc_roc, auc_pr]
