@@ -21,7 +21,7 @@ class OutlierDetector(ABC):
     ) -> list[Any]:
         logging.info(f"MODELO: {self.__class__.__name__}")
         logging.info("TREINANDO ...")
-        self.train(train)
+        self.fit(train)
         logging.info("TESTANDO ...")
         scores = self.test_scorer(test)
         logging.info("METRIFICANDO ...")
@@ -30,7 +30,7 @@ class OutlierDetector(ABC):
         return metrics
 
     @abstractmethod
-    def train(self, train: list[TimeSeries]):
+    def fit(self, train: list[TimeSeries]):
         pass
 
     @abstractmethod

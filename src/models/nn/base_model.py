@@ -1,4 +1,4 @@
-from typing import Any, Tuple
+from typing import Any, Tuple, override
 
 import numpy as np
 import torch
@@ -53,6 +53,7 @@ class OutlierNetwork(OutlierDetector, LightningModule):
     ) -> None:
         OutlierDetector.__init__(self)
         LightningModule.__init__(self)
+
         self.save_hyperparameters()
 
         self.model: nn.Module = nn.Identity()
@@ -86,12 +87,12 @@ class OutlierNetwork(OutlierDetector, LightningModule):
             }
         )
 
-    def apply(  # type: ignore[override]
+    def pipeline(
         self, train: list[TimeSeries], test: list[TimeSeries], test_labels: np.ndarray
     ) -> list[Any]:
         return OutlierDetector.apply(self, train, test, test_labels)
 
-    def train(self, train: list[TimeSeries], *, mode: bool = True) -> None:  # type: ignore[override]
+    def fit(self, train: list[TimeSeries], *, mode: bool = True) -> None:
         """
         Converte as séries de treino em janelas deslizantes (rótulo 0 —
         normal) e executa o Trainer do Lightning.
@@ -183,17 +184,17 @@ class OutlierNetwork(OutlierDetector, LightningModule):
     # LightningModule
     # ------------------------------------------------------------------
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x)
+    # def forward(self, x: torch.Tensor) -> torch.Tensor:
+    #     return self.model(x)
 
-    def training_step(
-        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
-    ) -> torch.Tensor:
-        data, labels = batch
-        logits = self.forward(data).flatten()
-        loss = F.binary_cross_entropy_with_logits(logits, labels, pos_weight=self.class_weight)
-        self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        return loss
+    # def training_step(
+    #     self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    # ) -> torch.Tensor:
+    #     data, labels = batch
+    #     logits = self.forward(data).flatten()
+    #     loss = F.binary_cross_entropy_with_logits(logits, labels, pos_weight=self.class_weight)
+    #     self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+    #     return loss
 
-    def configure_optimizers(self) -> torch.optim.Optimizer:
-        return optim.AdamW(self.parameters(), lr=self.lr)
+    # def configure_optimizers(self) -> torch.optim.Optimizer:
+    #     return optim.AdamW(self.parameters(), lr=self.lr)

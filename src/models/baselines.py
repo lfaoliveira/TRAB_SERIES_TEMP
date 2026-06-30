@@ -111,7 +111,7 @@ class KMeans(OutlierDetector):
         )
         self.threshold = threshold
 
-    def train(self, train: list[TimeSeries]):
+    def fit(self, train: list[TimeSeries]):
         self.scorer.fit(train)
 
     def test_scorer(self, test: list[TimeSeries]):
@@ -159,7 +159,7 @@ class Hampel(OutlierDetector):
         self.window_size = window_size
         self.n_sigmas = n_sigmas
 
-    def train(self, train: list[TimeSeries]):
+    def fit(self, train: list[TimeSeries]):
         # Filtro de Hampel é não-supervisionado e sem estado — nada a treinar
         pass
 
@@ -232,7 +232,7 @@ class SARIMA(OutlierDetector):
         self.kwargs = kwargs
         self.model: DartsSARIMA | None = None
 
-    def train(self, train: list[TimeSeries]):
+    def fit(self, train: list[TimeSeries]):
         if not train:
             return
         self.model = DartsSARIMA(
@@ -309,7 +309,7 @@ class IsolationForest(OutlierDetector):
         self.model: sklearn.ensemble.IsolationForest | None = None
         self._n_features: int = 0
 
-    def train(self, train: list[TimeSeries]):
+    def fit(self, train: list[TimeSeries]):
         ws = self.window_size
         X_train: list[np.ndarray] = []
         for ts in train:
