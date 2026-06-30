@@ -1,6 +1,8 @@
+from abc import abstractmethod
 import logging
-from typing import Any, Callable, List
+from typing import Any, Callable, List, Optional
 
+from lightning import LightningModule
 import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
@@ -13,6 +15,84 @@ from src.models.outlier import OutlierDetector
 
 
 type WindowPredicate = Callable[[np.ndarray, Any], pd.Series[bool]]
+
+
+# ---------------------------------------------------------------------------
+# Utilitário centralizado de janelamento
+# ---------------------------------------------------------------------------
+
+
+def extract_windows(
+    values: np.ndarray,
+    window_size: int,
+    centered: bool = False,
+    padding_mode: str = "edge",
+) -> np.ndarray:
+    """
+    Extrai janelas deslizantes de um array 1-D.
+
+    Dois modos de operação:
+
+    - **centered=False** (padrão): retorna um array ``(n_windows, window_size)``
+      com janelas consecutivas sem stride::
+
+          windows[k] = values[k : k + window_size]
+
+      Neste modo o número de janelas é ``n_windows = n - window_size + 1``.
+
+    - **centered=True**: retorna um array ``(n, window_size)`` onde cada
+      linha *i* é uma janela centrada no ponto ``values[i]``. Quando a
+      janela extrapola as bordas da série, o padding é feito com o modo
+      indicado por *padding_mode*.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        Array 1-D de valores.
+    window_size : int
+        Número de elementos por janela.
+    centered : bool
+        Se ``True``, cada ponto ganha uma janela centrada nele com padding
+        nas bordas. Se ``False`` (padrão), janelas consecutivas sem stride.
+    padding_mode : str
+        Modo de padding ``np.pad`` usado nas bordas quando ``centered=True``.
+
+    Returns
+    -------
+    np.ndarray
+        Array de janelas. Shape ``(n_windows, window_size)`` para
+        ``centered=False`` ou ``(n, window_size)`` para ``centered=True``.
+        Retorna um array vazio ``(0, window_size)`` se os dados forem
+        mais curtos que a janela no modo não-centrado.
+    """
+    values = np.asarray(values, dtype=float)
+    n = len(values)
+    ws = window_size
+
+    if not centered:
+        if n < ws:
+            return np.empty((0, ws), dtype=float)
+        return np.lib.stride_tricks.sliding_window_view(values, window_shape=ws)
+
+    # Modo centrado: cada ponto i recebe uma janela com ws elementos
+    half = ws // 2
+    windows = np.empty((n, ws), dtype=float)
+
+    for i in range(n):
+        left = i - half
+        right = i + (ws - half - 1)  # left + 1 + right == ws
+        start = max(0, left)
+        end = min(n, right + 1)
+        window = values[start:end]
+
+        if len(window) < ws:
+            pad_before = max(0, -left)
+            pad_after = max(0, right + 1 - n)
+            window = np.pad(window, (pad_before, pad_after), mode=padding_mode)
+
+        windows[i] = window
+
+    return windows
 
 
 def rolling_window_apply(
@@ -31,12 +111,10 @@ def rolling_window_apply(
         Lista de sequências numéricas 1-D.
     window_size : int
         Número de observações em cada janela.
-    predicate : Callable[[pd.Series], bool]
-        Função que recebe uma pd.Series (uma janela) e retorna bool.
-    min_periods : int | None
-        Mínimo de observações válidas para calcular o resultado.
-        None → igual a window_size (apenas janelas completas).
-        Use 1 para obter resultado desde o primeiro elemento (como pad_value=0).
+    predicate : Callable[[np.ndarray], bool]
+        Função que recebe um np.ndarray (uma janela) e retorna bool.
+    overlap : bool
+        Se ``False`` (padrão), janelas não se sobrepõem (stride = window_size).
 
     Returns
     -------
@@ -48,19 +126,30 @@ def rolling_window_apply(
 
     results: List[np.ndarray] = []
 
-    # NOTE: EVITAR USAR OVERLAP! (eficiência)
-    step = window_size if not overlap else None
-
     for series in series_list:
-        s = pd.Series(series.univariate_values(), dtype=float)
+        vals = np.asarray(series.univariate_values(), dtype=float)
+        stride = 1 if overlap else window_size
+        windows = extract_windows(vals, window_size, centered=False)
 
-        rolling = s.rolling(window=window_size, step=step, min_periods=window_size, center=True)
-        for rol in rolling:
-            logging.info(rol)
-        # raw=False → pd.Series  # pd.NA para janelas incompletas
-        bool_series = rolling.apply(lambda w: predicate(w), raw=False).astype("boolean")
+        if not overlap:
+            # extract_windows sem stride dá sliding window pura;
+            # queremos stride = window_size, então amostramos de stride em stride
+            windows = windows[::stride]
 
-        results.append(bool_series.to_numpy(dtype=bool, na_value=False))
+        bool_vals = np.array([predicate(w) for w in windows], dtype=bool)
+
+        # Expande o resultado para o comprimento original via repeat
+        if not overlap:
+            n = len(vals)
+            expanded = np.full(n, False, dtype=bool)
+            for idx, w in enumerate(windows):
+                start = idx * window_size
+                end = min(start + window_size, n)
+                if bool_vals[idx]:
+                    expanded[start:end] = True
+            results.append(expanded)
+        else:
+            results.append(bool_vals)
 
     return results
 
@@ -111,14 +200,18 @@ class KMeans(OutlierDetector):
         )
         self.threshold = threshold
 
-    def fit(self, train: list[TimeSeries]):
+    def fit(
+        self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
+    ) -> None:
         self.scorer.fit(train)
 
-    def test_scorer(self, test: list[TimeSeries]):
+    def test_scorer(
+        self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
+    ):
         if self.scorer is None:
             raise RuntimeError("KMeans must be trained before scoring.")
 
-        scores: list[TimeSeries] = [self.scorer.score(ts) for ts in test]
+        scores: list[TimeSeries] = [self.scorer.score(ts) for ts in test]  # type: ignore
         return scores
 
     def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]):
@@ -144,7 +237,7 @@ class KMeans(OutlierDetector):
 
         logging.info(f"AUC-ROC: {auc_roc:.4f}")
         logging.info(f"AUC-PR : {auc_pr:.4f}")
-        return [auc_roc, auc_pr]
+        return {"name": self.__class__.__name__, "auc_roc": auc_roc, "auc_pr": auc_pr}
 
 
 class Hampel(OutlierDetector):
@@ -159,11 +252,13 @@ class Hampel(OutlierDetector):
         self.window_size = window_size
         self.n_sigmas = n_sigmas
 
-    def fit(self, train: list[TimeSeries]):
+    def fit(self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None):
         # Filtro de Hampel é não-supervisionado e sem estado — nada a treinar
         pass
 
-    def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
+    def test_scorer(
+        self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
+    ) -> list[TimeSeries]:
         """
         Para cada TimeSeries, computa um escore contínuo de anomalia:
         |x_i - mediana_local| / sigma_local.
@@ -171,24 +266,17 @@ class Hampel(OutlierDetector):
         """
 
         scores: list[TimeSeries] = []
-        k = self.window_size // 2
 
         for ts in test:
             data = np.asarray(ts.univariate_values(), dtype=float)
-            n = len(data)
-            score_vals = np.zeros(n, dtype=float)
+            windows = extract_windows(data, self.window_size, centered=True)
 
-            for i in range(n):
-                start = max(0, i - k)
-                end = min(n, i + k + 1)
-                window = data[start:end]
+            median = np.median(windows, axis=1)
+            mad = np.median(np.abs(windows - median[:, None]), axis=1)
+            sigma = 1.4826 * mad
 
-                median = np.median(window)
-                mad = np.median(np.abs(window - median))
-                sigma = 1.4826 * mad
-
-                # ponytail: se sigma == 0 (janela constante), score é 0
-                score_vals[i] = np.abs(data[i] - median) / sigma if sigma > 0 else 0.0
+            # ponytail: onde sigma == 0 (janela constante), score é 0
+            score_vals = np.where(sigma > 0, np.abs(data - median) / sigma, 0.0)
 
             scores.append(TimeSeries.from_values(score_vals))
 
@@ -208,7 +296,7 @@ class Hampel(OutlierDetector):
 
         logging.info(f"AUC-ROC: {auc_roc:.4f}")
         logging.info(f"AUC-PR : {auc_pr:.4f}")
-        return [auc_roc, auc_pr]
+        return {"name": self.__class__.__name__, "auc_roc": auc_roc, "auc_pr": auc_pr}
 
 
 class SARIMA(OutlierDetector):
@@ -221,7 +309,8 @@ class SARIMA(OutlierDetector):
     def __init__(
         self,
         seasonal_order: tuple[int, int, int, int] = (1, 0, 0, 12),
-        order: tuple[int, int, int] = (1, 0, 0),
+        # lag de 1, diferenciacao de 1 e 1 na estimacao de erro
+        order: tuple[int, int, int] = (1, 1, 1),
         n_epochs: int = 10,
         **kwargs,
     ):
@@ -232,37 +321,61 @@ class SARIMA(OutlierDetector):
         self.kwargs = kwargs
         self.model: DartsSARIMA | None = None
 
-    def fit(self, train: list[TimeSeries]):
+    def fit(self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None):
         if not train:
             return
         self.model = DartsSARIMA(
-            order=self.order,
+            p=self.order[0],
+            d=self.order[1],
+            q=self.order[2],
             seasonal_order=self.seasonal_order,
-            n_epochs=self.n_epochs,
             **self.kwargs,
         )
-        self.model.fit(train, verbose=False)
+        for ts in train:
+            self.model.fit(ts, verbose=False)
 
-    def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
+    def test_scorer(
+        self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
+    ) -> list[TimeSeries]:
+        from joblib import Parallel, delayed
+
         if self.model is None:
             raise RuntimeError("SARIMA must be trained before scoring.")
+        assert self.model is not None
 
-        scores: list[TimeSeries] = []
-        for ts in test:
+        def calcula_residuos(ts):
             pred = self.model.historical_forecasts(
-                ts,
-                forecast_horizon=1,
-                stride=1,
-                retrain=False,
-                last_points_only=True,
-                verbose=False,
+                ts, forecast_horizon=1, stride=1, retrain=False, last_points_only=True
             )
             obs = ts.values(copy=False).flatten()
             est = pred.values(copy=False).flatten()
             if len(est) < len(obs):
                 obs = obs[-len(est) :]
             residual = np.abs(obs - est)
-            scores.append(TimeSeries.from_values(residual))
+            return TimeSeries.from_values(residual)
+
+            # Roda o loop em paralelo usando todos os núcleos disponíveis (n_jobs=-1)
+
+        scores: list[TimeSeries] = []
+        scores = Parallel(n_jobs=-1)(delayed(calcula_residuos)(ts) for ts in test)
+
+        # preds_list = self.model.historical_forecasts(
+        #     test,
+        #     forecast_horizon=1,
+        #     stride=1,
+        #     retrain=False,
+        #     last_points_only=True,
+        #     verbose=True,
+        # )
+        # for ts, pred in zip(test, preds_list):
+        #     obs = ts.values(copy=False).flatten()
+        #     est = pred.values(copy=False).flatten()
+
+        #     if len(est) < len(obs):
+        #         obs = obs[-len(est) :]
+
+        #     residual = np.abs(obs - est)
+        #     scores.append(TimeSeries.from_values(residual))
 
         return scores
 
@@ -281,7 +394,7 @@ class SARIMA(OutlierDetector):
 
         logging.info(f"AUC-ROC: {auc_roc:.4f}")
         logging.info(f"AUC-PR : {auc_pr:.4f}")
-        return [auc_roc, auc_pr]
+        return {"name": self.__class__.__name__, "auc_roc": auc_roc, "auc_pr": auc_pr}
 
 
 class IsolationForest(OutlierDetector):
@@ -309,20 +422,19 @@ class IsolationForest(OutlierDetector):
         self.model: sklearn.ensemble.IsolationForest | None = None
         self._n_features: int = 0
 
-    def fit(self, train: list[TimeSeries]):
+    def fit(self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None):
         ws = self.window_size
         X_train: list[np.ndarray] = []
         for ts in train:
             vals = ts.values(copy=False).flatten()
-            if len(vals) < ws:
-                continue
-            for i in range(len(vals) - ws + 1):
-                X_train.append(vals[i : i + ws])
+            w = extract_windows(vals, ws, centered=False)
+            if w.shape[0] > 0:
+                X_train.append(w)
 
         if not X_train:
             raise ValueError(f"Nenhuma janela de tamanho {ws} pôde ser extraída do treino.")
 
-        X = np.stack(X_train)
+        X = np.concatenate(X_train, axis=0)
         self._n_features = X.shape[1]
 
         self.model = sklearn.ensemble.IsolationForest(
@@ -333,7 +445,9 @@ class IsolationForest(OutlierDetector):
         )
         self.model.fit(X)
 
-    def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
+    def test_scorer(
+        self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
+    ) -> list[TimeSeries]:
         if self.model is None:
             raise RuntimeError("IsolationForest must be trained before scoring.")
 
@@ -342,24 +456,8 @@ class IsolationForest(OutlierDetector):
 
         for ts in test:
             vals = ts.values(copy=False).flatten()
-            n = len(vals)
-            score_vals = np.full(n, 0.0, dtype=float)
-
-            if n < ws:
-                scores.append(TimeSeries.from_values(score_vals))
-                continue
-
-            half = ws // 2
-            for i in range(n):
-                start = max(0, i - half)
-                end = min(n, i + half + 1)
-                window = vals[start:end]
-                if len(window) < ws:
-                    pad_before = max(0, half - i)
-                    pad_after = max(0, (i + half + 1) - n)
-                    window = np.pad(window, (pad_before, pad_after), mode="edge")
-                score_vals[i] = -self.model.decision_function(window.reshape(1, -1)).item()
-
+            windows = extract_windows(vals, ws, centered=True)
+            score_vals = -self.model.decision_function(windows).ravel()
             scores.append(TimeSeries.from_values(score_vals))
 
         return scores
@@ -377,4 +475,4 @@ class IsolationForest(OutlierDetector):
 
         logging.info(f"AUC-ROC: {auc_roc:.4f}")
         logging.info(f"AUC-PR : {auc_pr:.4f}")
-        return [auc_roc, auc_pr]
+        return {"name": self.__class__.__name__, "auc_roc": auc_roc, "auc_pr": auc_pr}
