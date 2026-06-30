@@ -6,7 +6,7 @@ import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
 from darts import TimeSeries
 from darts.ad.scorers import KMeansScorer
-from darts.models import SARIMA as DartsSARIMA
+from darts.models import ARIMA as DartsSARIMA
 import sklearn.ensemble
 
 from src.models.outlier import OutlierDetector
