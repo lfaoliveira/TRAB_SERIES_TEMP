@@ -8,8 +8,8 @@ import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
 from darts import TimeSeries
 from darts.ad.scorers import KMeansScorer
-from darts.models import ARIMA as DartsSARIMA
 import sklearn.ensemble
+import sklearn.neighbors
 
 from src.models.outlier import OutlierDetector
 
@@ -299,83 +299,70 @@ class Hampel(OutlierDetector):
         return {"name": self.__class__.__name__, "auc_roc": auc_roc, "auc_pr": auc_pr}
 
 
-class SARIMA(OutlierDetector):
+class LocalOutlierFactor(OutlierDetector):
     """
-    Outlier detection using a SARIMA forecasting model via darts.
-    A SARIMA model is trained per series, then anomaly scores are computed as the
-    absolute residual |observation - forecast| from historical_forecasts.
+    Outlier detection using sklearn's LocalOutlierFactor with sliding window features.
+    Each window of `window_size` consecutive points becomes a feature vector;
+    the anomaly score for the center point of the window is the negated LOF score
+    (higher = more anomalous). LOF is used in a novelty detection mode: it is fitted
+    on the training windows, then scores test windows without refitting.
     """
 
     def __init__(
         self,
-        seasonal_order: tuple[int, int, int, int] = (1, 0, 0, 12),
-        # lag de 1, diferenciacao de 1 e 1 na estimacao de erro
-        order: tuple[int, int, int] = (1, 1, 1),
-        n_epochs: int = 10,
+        window_size: int = 20,
+        n_neighbors: int = 20,
+        contamination: float | str = "auto",
         **kwargs,
     ):
         super().__init__()
-        self.seasonal_order = seasonal_order
-        self.order = order
-        self.n_epochs = n_epochs
+        self.window_size = window_size
+        self.n_neighbors = n_neighbors
+        self.contamination = contamination
         self.kwargs = kwargs
-        self.model: DartsSARIMA | None = None
+        self.model: sklearn.neighbors.LocalOutlierFactor | None = None
+        self._n_features: int = 0
 
     def fit(self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None):
-        if not train:
-            return
-        self.model = DartsSARIMA(
-            p=self.order[0],
-            d=self.order[1],
-            q=self.order[2],
-            seasonal_order=self.seasonal_order,
+        ws = self.window_size
+        X_train: list[np.ndarray] = []
+        for ts in train:
+            vals = ts.values(copy=False).flatten()
+            w = extract_windows(vals, ws, centered=False)
+            if w.shape[0] > 0:
+                X_train.append(w)
+
+        if not X_train:
+            raise ValueError(f"Nenhuma janela de tamanho {ws} pôde ser extraída do treino.")
+
+        X = np.concatenate(X_train, axis=0)
+        self._n_features = X.shape[1]
+
+        # novelty=True permite fit + predict separados (como IsolationForest)
+        self.model = sklearn.neighbors.LocalOutlierFactor(
+            n_neighbors=self.n_neighbors,
+            contamination=self.contamination,
+            novelty=True,
             **self.kwargs,
         )
-        for ts in train:
-            self.model.fit(ts, verbose=False)
+        self.model.fit(X)
 
     def test_scorer(
         self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
     ) -> list[TimeSeries]:
-        from joblib import Parallel, delayed
-
         if self.model is None:
-            raise RuntimeError("SARIMA must be trained before scoring.")
-        assert self.model is not None
+            raise RuntimeError("LocalOutlierFactor must be trained before scoring.")
 
-        def calcula_residuos(ts):
-            pred = self.model.historical_forecasts(
-                ts, forecast_horizon=1, stride=1, retrain=False, last_points_only=True
-            )
-            obs = ts.values(copy=False).flatten()
-            est = pred.values(copy=False).flatten()
-            if len(est) < len(obs):
-                obs = obs[-len(est) :]
-            residual = np.abs(obs - est)
-            return TimeSeries.from_values(residual)
-
-            # Roda o loop em paralelo usando todos os núcleos disponíveis (n_jobs=-1)
-
+        ws = self.window_size
         scores: list[TimeSeries] = []
-        scores = Parallel(n_jobs=-1)(delayed(calcula_residuos)(ts) for ts in test)
 
-        # preds_list = self.model.historical_forecasts(
-        #     test,
-        #     forecast_horizon=1,
-        #     stride=1,
-        #     retrain=False,
-        #     last_points_only=True,
-        #     verbose=True,
-        # )
-        # for ts, pred in zip(test, preds_list):
-        #     obs = ts.values(copy=False).flatten()
-        #     est = pred.values(copy=False).flatten()
-
-        #     if len(est) < len(obs):
-        #         obs = obs[-len(est) :]
-
-        #     residual = np.abs(obs - est)
-        #     scores.append(TimeSeries.from_values(residual))
+        for ts in test:
+            vals = ts.values(copy=False).flatten()
+            windows = extract_windows(vals, ws, centered=True)
+            # score_samples retorna valores negativos, mais negativo = mais anômalo
+            # invertemos: positivo grande = mais anômalo
+            score_vals = -self.model.score_samples(windows).ravel()
+            scores.append(TimeSeries.from_values(score_vals))
 
         return scores
 
@@ -384,9 +371,7 @@ class SARIMA(OutlierDetector):
         y_score = []
         for labels, score in zip(test_labels, scores):
             score_vals = score.values(copy=False).flatten()
-            n_warmup = len(labels) - len(score_vals)
-            labels_aligned = labels[n_warmup:] if n_warmup > 0 else labels
-            y_true.extend(labels_aligned)
+            y_true.extend(labels)
             y_score.extend(score_vals)
 
         auc_roc = roc_auc_score(y_true, y_score)
