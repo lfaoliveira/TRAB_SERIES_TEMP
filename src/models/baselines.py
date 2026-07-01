@@ -200,14 +200,10 @@ class KMeans(OutlierDetector):
         )
         self.threshold = threshold
 
-    def fit(
-        self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
-    ) -> None:
+    def fit(self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None) -> None:
         self.scorer.fit(train)
 
-    def test_scorer(
-        self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
-    ):
+    def test_scorer(self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None):
         if self.scorer is None:
             raise RuntimeError("KMeans must be trained before scoring.")
 
@@ -229,9 +225,6 @@ class KMeans(OutlierDetector):
             y_true.extend(labels_aligned)
             y_score.extend(score_vals)
 
-        logging.info(
-            "SHAPES — y_true: {np.array(y_true).shape}, y_score: {np.array(y_score).shape}"
-        )
         auc_roc = roc_auc_score(y_true, y_score)
         auc_pr = average_precision_score(y_true, y_score)
 
