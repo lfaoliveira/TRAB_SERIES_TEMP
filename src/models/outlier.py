@@ -1,6 +1,7 @@
 import logging
-from typing import Any
+from typing import Any, Optional
 
+from lightning import LightningModule
 import numpy as np
 from abc import ABC, abstractmethod
 from darts import TimeSeries
@@ -18,7 +19,7 @@ class OutlierDetector(ABC):
 
     def apply(
         self, train: list[TimeSeries], test: list[TimeSeries], test_labels: np.ndarray
-    ) -> list[Any]:
+    ) -> dict[str, Any]:
         logging.info(f"MODELO: {self.__class__.__name__}")
         logging.info("TREINANDO ...")
         self.fit(train)
@@ -30,13 +31,15 @@ class OutlierDetector(ABC):
         return metrics
 
     @abstractmethod
-    def fit(self, train: list[TimeSeries]):
+    def fit(self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None):
         pass
 
     @abstractmethod
-    def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
+    def test_scorer(
+        self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
+    ) -> list[TimeSeries]:
         pass
 
     @abstractmethod
-    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]) -> list[Any]:
+    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]) -> dict[str, Any]:
         pass
