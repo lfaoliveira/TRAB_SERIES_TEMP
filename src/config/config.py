@@ -26,9 +26,7 @@ class CentralConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     run_mode: RunMode = Field(default="prototype", description="Modo de execução")
-    dataset: DatasetConfig = Field(
-        default_factory=DatasetConfig, description="Configurações do dataset"
-    )
+    dataset: DatasetConfig = Field(default_factory=DatasetConfig, description="Configurações do dataset")
 
 
 def load_config(path: Optional[Path] = None) -> CentralConfig:

@@ -63,9 +63,7 @@ class VAE(LightningModule):
         z = self.reparameterize(mu, logvar)
         return self.decode(z)
 
-    def training_step(
-        self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int
-    ) -> torch.Tensor:
+    def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
         x, _ = batch
         # IGUAL FORWARD!
         mu, logvar = self.encode(x)

@@ -114,18 +114,14 @@ def final_analysis(
         logging.info(f"Experiment '{exp_name}' not found")
         return pd.DataFrame(), processer
 
-    all_experiment_runs = pd.DataFrame(
-        mlflow.search_runs(experiment_ids=[experiment.experiment_id])
-    )
+    all_experiment_runs = pd.DataFrame(mlflow.search_runs(experiment_ids=[experiment.experiment_id]))
     assert isinstance(all_experiment_runs, pd.DataFrame)
 
     for choice in models:
         # Filter runs for this model by run name
         if "tags.mlflow.runName" in all_experiment_runs.columns:
             runs = all_experiment_runs[
-                all_experiment_runs["tags.mlflow.runName"].str.contains(
-                    choice, case=False, na=False
-                )
+                all_experiment_runs["tags.mlflow.runName"].str.contains(choice, case=False, na=False)
             ].copy()
         else:
             runs = all_experiment_runs.copy()
