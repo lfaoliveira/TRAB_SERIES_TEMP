@@ -17,3 +17,4 @@ export/
 output/
 .install_complete
 .ruff_cache
+lightning_logs/**
