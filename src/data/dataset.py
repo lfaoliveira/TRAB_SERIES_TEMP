@@ -65,7 +65,7 @@ class NasaDataset:
         prototype = ProjectSettings.run_mode == "prototype"
 
         # Load raw numpy arrays ------------------------------------------------
-        train_wide, test_wide = self.load_dataset(base_path, prototype=prototype, skip_load=True)
+        train_wide, test_wide = self.load_dataset(base_path, prototype=prototype)
         if prototype:
             test_wide[:10_000].to_csv(export_path / "test_wide.csv")
 
@@ -99,15 +99,11 @@ class NasaDataset:
     # Loading
     # ------------------------------------------------------------------
 
-    def load_dataset(
-        self, base_path: Path, prototype: bool = False, skip_load=True
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def load_dataset(self, base_path: Path, prototype: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Carrega os arquivos M4 em wide format e cachea em Parquet."""
 
-        base_path = base_path / "data" / "data"
         self.labels_file = base_path / "labeled_anomalies.csv"
-        train_dir = base_path / "train"
-        test_dir = base_path / "test"
+        base_path = base_path / "data" / "data"
         train_dir = base_path / "train"
         test_dir = base_path / "test"
 
