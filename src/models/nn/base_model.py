@@ -86,6 +86,7 @@ class OutlierModelWrapper(OutlierDetector):
     def fit(
         self,
         train: list[TimeSeries],
+        pl_model: Optional[LightningModule | None] = None,
     ) -> None:
         """
         Converte as séries de treino em janelas deslizantes (rótulo 0 —
@@ -95,6 +96,11 @@ class OutlierModelWrapper(OutlierDetector):
         deve ser passado como keyword-only. Quando chamado pelo pipeline
         ``apply()``, apenas a série é fornecida.
         """
+        model = pl_model or self.pl_model
+        if model is None:
+            logging.info("PL MODEL NULO — pulando fit")
+            raise RuntimeError("PL MODEL NULO")
+
         ws = self.window_size
         X_list: list[np.ndarray] = []
 
@@ -125,44 +131,49 @@ class OutlierModelWrapper(OutlierDetector):
             logger=True,
             enable_progress_bar=True,
         )
-        if self.pl_model:
-            trainer.fit(self.pl_model, loader)
+        trainer.fit(model, loader)
 
-    def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
+    def test_scorer(
+        self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
+    ) -> list[TimeSeries]:
         """
-        Para cada série, calcula P(anomalia) = sigmoid(logit) via janela
-        deslizante centrada. Retorna uma TimeSeries de scores por série.
+        Para cada série, calcula o score de anomalia via erro de reconstrução (MSE)
+        em janelas deslizantes centradas. Retorna uma TimeSeries de scores por série.
         """
-        if self.pl_model:
-            ws = self.window_size
-            scores: list[TimeSeries] = []
-            self.pl_model.eval()
-
-            with torch.no_grad():
-                for ts in test:
-                    vals = ts.values(copy=False).flatten()
-                    n = len(vals)
-                    score_vals = np.full(n, 0.0, dtype=float)
-
-                    if n < ws:
-                        scores.append(TimeSeries.from_values(score_vals))
-                        continue
-
-                    # Padding reflexivo nas bordas
-                    half = ws // 2
-                    padded = np.pad(vals, (half, ws - half - 1), mode="edge")
-
-                    for i in range(n):
-                        window = padded[i : i + ws]
-                        x = torch.tensor(window, dtype=torch.float32).unsqueeze(0)
-                        logit = self.pl_model.forward(x).item()
-                        score_vals[i] = torch.sigmoid(torch.tensor(logit)).item()
-
-                    scores.append(TimeSeries.from_values(score_vals))
-            return scores
-        else:
+        model = pl_model or self.pl_model
+        if model is None:
             logging.info("PL MODEL NULO!")
-            return None
+            return []
+
+        ws = self.window_size
+        scores: list[TimeSeries] = []
+        model.eval()
+
+        with torch.no_grad():
+            for ts in test:
+                vals = ts.values(copy=False).flatten()
+                n = len(vals)
+                score_vals = np.full(n, 0.0, dtype=float)
+
+                if n < ws:
+                    scores.append(TimeSeries.from_values(score_vals))
+                    continue
+
+                # Padding reflexivo nas bordas para janelas centradas
+                half = ws // 2
+                padded = np.pad(vals, (half, ws - half - 1), mode="edge")
+
+                for i in range(n):
+                    window = padded[i : i + ws]
+                    x = torch.tensor(window, dtype=torch.float32).unsqueeze(0)
+                    recon = model(x)  # (1, input_dim)
+                    # AVISO: ver se esse MSE faz sentido para todos os modelos!
+                    mse = F.mse_loss(recon, x, reduction="none").mean().item()
+                    score_vals[i] = mse
+
+                scores.append(TimeSeries.from_values(score_vals))
+
+        return scores
 
     def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]) -> dict[str, Any]:
         y_true: list[int] = []

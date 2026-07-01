@@ -1,51 +1,59 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 from lightning import LightningModule
 
 
 class TCN(LightningModule):
     """
-    TCN forecasting model wrapped as a LightningModule.
-
-    The underlying ``TCNModel`` (darts) is trained externally via its own
-    ``.fit()`` method. This wrapper stores it so it can be composed inside
-    a Lightning pipeline if needed.
-
-    Subclasses may override ``forward``, ``training_step``, etc.
+    1D Convolutional Autoencoder for anomaly detection.
+    Reconstructs input windows of size ``input_dim``;
+    reconstruction error (MSE) = anomaly score.
     """
 
     def __init__(
         self,
-        input_chunk_length: int = 12,
-        output_chunk_length: int = 1,
-        kernel_size: int = 3,
-        num_filters: int = 6,
-        num_layers: int | None = None,
-        dropout: float = 0.0,
+        input_dim: int = 20,
+        latent_dim: int = 8,
         lr: float = 1e-3,
     ):
         super().__init__()
         self.save_hyperparameters()
-
-        self.input_chunk_length = input_chunk_length
-        self.output_chunk_length = output_chunk_length
-        self.kernel_size = kernel_size
-        self.num_filters = num_filters
-        self.num_layers = num_layers
-        self.dropout = dropout
         self.lr = lr
+        # AVISO: SUbstituir por modelo do Darts ou modelo da lib https://github.com/paul-krug/pytorch-tcn
+        # Encoder:  1D convs + MLP bottleneck
+        self.encoder = nn.Sequential(
+            nn.Conv1d(1, 16, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv1d(16, 8, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(8 * input_dim, latent_dim),
+        )
 
-        # The actual model is constructed and trained externally
-        self.model: nn.Module = nn.Identity()
+        # Decoder: MLP + transposed convs
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, 8 * input_dim),
+            nn.ReLU(),
+            nn.Unflatten(1, (8, input_dim)),
+            nn.ConvTranspose1d(8, 16, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.ConvTranspose1d(16, 1, kernel_size=3, stride=1, padding=1),
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x)
+        # x: (batch, input_dim)
+        x = x.unsqueeze(1)  # (batch, 1, input_dim)
+        z = self.encoder(x)  # (batch, latent_dim)
+        recon = self.decoder(z)  # (batch, 1, input_dim)
+        return recon.squeeze(1)  # (batch, input_dim)
 
     def training_step(self, batch, batch_idx) -> torch.Tensor:
-        raise NotImplementedError(
-            "TCN is trained via darts' TCNModel.fit(), not Lightning. "
-            "Override training_step to use Lightning."
-        )
+        x, _ = batch
+        recon = self(x)
+        loss = F.mse_loss(recon, x)
+        self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        return loss
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)

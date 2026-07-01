@@ -85,7 +85,9 @@ class VAE(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         x, _ = batch
-        x_recon, mu, logvar = self.forward(x)
+        mu, logvar = self.encode(x)
+        z = self.reparameterize(mu, logvar)
+        x_recon = self.decode(z)
 
         recon_loss = F.mse_loss(x_recon, x, reduction="sum")
         q = Normal(mu, logvar.mul(0.5).exp())
