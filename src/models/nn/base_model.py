@@ -1,4 +1,5 @@
-from typing import Any, Tuple, override
+import logging
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -7,7 +8,6 @@ import torch.nn.functional as F
 from darts import TimeSeries
 from lightning import LightningModule, Trainer
 from sklearn.metrics import average_precision_score, roc_auc_score
-from torch import optim
 from torch.utils.data import DataLoader, TensorDataset
 from torchmetrics import (
     AveragePrecision,
@@ -22,7 +22,7 @@ from torchmetrics import (
 from src.models.outlier import OutlierDetector
 
 
-class OutlierNetwork(OutlierDetector, LightningModule):
+class OutlierModelWrapper(OutlierDetector):
     """
     Base class for outlier detection models using PyTorch Lightning.
 
@@ -39,11 +39,10 @@ class OutlierNetwork(OutlierDetector, LightningModule):
     o padrão normal; pontos que fogem desse padrão recebem escore alto.
     """
 
-    class_weight: torch.Tensor
-
     def __init__(
         self,
         input_dim: int,
+        pl_model: Optional[LightningModule] = None,
         window_size: int = 20,
         lr: float = 1e-3,
         pos_weight: float = 1.0,
@@ -52,9 +51,6 @@ class OutlierNetwork(OutlierDetector, LightningModule):
         accelerator: str = "auto",
     ) -> None:
         OutlierDetector.__init__(self)
-        LightningModule.__init__(self)
-
-        self.save_hyperparameters()
 
         self.model: nn.Module = nn.Identity()
         self.lr = lr
@@ -62,12 +58,7 @@ class OutlierNetwork(OutlierDetector, LightningModule):
         self.batch_size = batch_size
         self.max_epochs = max_epochs
         self._accelerator = accelerator
-
-        # Peso para a classe positiva (anomalia) no BCEWithLogitsLoss
-        self.register_buffer(
-            "class_weight",
-            torch.tensor(pos_weight, dtype=torch.float32),
-        )
+        self.pl_model = pl_model
 
         self.val_metrics = MetricCollection(
             {
@@ -89,10 +80,13 @@ class OutlierNetwork(OutlierDetector, LightningModule):
 
     def pipeline(
         self, train: list[TimeSeries], test: list[TimeSeries], test_labels: np.ndarray
-    ) -> list[Any]:
+    ) -> dict[str, Any]:
         return OutlierDetector.apply(self, train, test, test_labels)
 
-    def fit(self, train: list[TimeSeries], *, mode: bool = True) -> None:
+    def fit(
+        self,
+        train: list[TimeSeries],
+    ) -> None:
         """
         Converte as séries de treino em janelas deslizantes (rótulo 0 —
         normal) e executa o Trainer do Lightning.
@@ -128,45 +122,49 @@ class OutlierNetwork(OutlierDetector, LightningModule):
             max_epochs=self.max_epochs,
             accelerator=self._accelerator,
             enable_checkpointing=False,
-            logger=False,
-            enable_progress_bar=False,
+            logger=True,
+            enable_progress_bar=True,
         )
-        trainer.fit(self, loader)
+        if self.pl_model:
+            trainer.fit(self.pl_model, loader)
 
     def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
         """
         Para cada série, calcula P(anomalia) = sigmoid(logit) via janela
         deslizante centrada. Retorna uma TimeSeries de scores por série.
         """
-        ws = self.window_size
-        scores: list[TimeSeries] = []
-        self.eval()
+        if self.pl_model:
+            ws = self.window_size
+            scores: list[TimeSeries] = []
+            self.pl_model.eval()
 
-        with torch.no_grad():
-            for ts in test:
-                vals = ts.values(copy=False).flatten()
-                n = len(vals)
-                score_vals = np.full(n, 0.0, dtype=float)
+            with torch.no_grad():
+                for ts in test:
+                    vals = ts.values(copy=False).flatten()
+                    n = len(vals)
+                    score_vals = np.full(n, 0.0, dtype=float)
 
-                if n < ws:
+                    if n < ws:
+                        scores.append(TimeSeries.from_values(score_vals))
+                        continue
+
+                    # Padding reflexivo nas bordas
+                    half = ws // 2
+                    padded = np.pad(vals, (half, ws - half - 1), mode="edge")
+
+                    for i in range(n):
+                        window = padded[i : i + ws]
+                        x = torch.tensor(window, dtype=torch.float32).unsqueeze(0)
+                        logit = self.pl_model.forward(x).item()
+                        score_vals[i] = torch.sigmoid(torch.tensor(logit)).item()
+
                     scores.append(TimeSeries.from_values(score_vals))
-                    continue
+            return scores
+        else:
+            logging.info("PL MODEL NULO!")
+            return None
 
-                # Padding reflexivo nas bordas
-                half = ws // 2
-                padded = np.pad(vals, (half, ws - half - 1), mode="edge")
-
-                for i in range(n):
-                    window = padded[i : i + ws]
-                    x = torch.tensor(window, dtype=torch.float32).unsqueeze(0)
-                    logit = self.forward(x).item()
-                    score_vals[i] = torch.sigmoid(torch.tensor(logit)).item()
-
-                scores.append(TimeSeries.from_values(score_vals))
-
-        return scores
-
-    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]) -> list[Any]:
+    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]) -> dict[str, Any]:
         y_true: list[int] = []
         y_score: list[float] = []
 
@@ -178,7 +176,7 @@ class OutlierNetwork(OutlierDetector, LightningModule):
         auc_roc = float(roc_auc_score(y_true, y_score))
         auc_pr = float(average_precision_score(y_true, y_score))
 
-        return [auc_roc, auc_pr]
+        return {"name": self.__class__.__name__, "auc_roc": auc_roc, "auc_pr": auc_pr}
 
     # ------------------------------------------------------------------
     # LightningModule

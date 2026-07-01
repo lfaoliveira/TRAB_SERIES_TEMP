@@ -8,6 +8,7 @@ from darts import TimeSeries
 
 
 class OutlierDetector(ABC):
+    pl_model: Optional[LightningModule] = None
     # NOTE: COMENTADO POIS NEM TODOS MODELOS USAM JANELAMENTO!
     # def __init__(
     #     self, group_id: str = "series_id", target_id: str = "target", window_size=7
@@ -31,13 +32,11 @@ class OutlierDetector(ABC):
         return metrics
 
     @abstractmethod
-    def fit(self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None):
+    def fit(self, train: list[TimeSeries]):
         pass
 
     @abstractmethod
-    def test_scorer(
-        self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
-    ) -> list[TimeSeries]:
+    def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
         pass
 
     @abstractmethod
