@@ -106,10 +106,16 @@ class NasaDataset:
         base_path.mkdir(parents=True, exist_ok=True)
         self.labels_file = base_path / "labeled_anomalies.csv"
 
+        if os.environ.get("AMBIENTE") == "KAGGLE":
+            # No Kaggle, base_path já é a raiz com train/ e test/
+            train_dir = base_path / "train"
+            test_dir = base_path / "test"
+        else:
+            base_path = base_path / "data" / "data"
+            train_dir = base_path / "train"
+            test_dir = base_path / "test"
+
         download_path = base_path
-        base_path = base_path / "data" / "data"
-        train_dir = base_path / "train"
-        test_dir = base_path / "test"
         pqt_train: Path = download_path / "nasa_train.parquet"
         pqt_test: Path = download_path / "nasa_test.parquet"
 
@@ -125,10 +131,25 @@ class NasaDataset:
                 df_train = pd.read_parquet(pqt_train, engine="auto")
                 df_test = pd.read_parquet(pqt_test, engine="auto")
 
-            # DOWNLOAD DO DATASET
-            elif not train_dir.exists() or not test_dir.exists():
+            elif train_dir.exists() and test_dir.exists():
+                # Carrega direto dos .npy
+                logging.info("Loading train split …")
+                df_train = self._load_npy_directory(train_dir, prototype=prototype)
+                logging.info("Loading test split …")
+                df_test = self._load_npy_directory(test_dir, prototype=prototype)
+
+                if df_train is None or df_test is None:
+                    raise RuntimeError("Failed to load dataset: df_train or df_test is None")
+
+                df_train.to_parquet(pqt_train, compression="gzip", engine="auto", index=True)
+                df_test.to_parquet(pqt_test, compression="gzip", engine="auto", index=True)
                 if self.verbose:
-                    logging.info(f"Baixando M4 via KaggleHub para {download_path}")
+                    logging.info(f"Cache criado: {pqt_train} e {pqt_test}")
+
+            else:
+                # DOWNLOAD DO DATASET
+                if self.verbose:
+                    logging.info(f"Baixando NASA via KaggleHub para {download_path}")
                 import kagglehub
 
                 dataset_path = kagglehub.dataset_download(
@@ -136,12 +157,11 @@ class NasaDataset:
                     output_dir=str(download_path),
                 )
                 logging.info(f"DATASET PATH: {dataset_path}")
-                if os.environ["AMBIENTE"] == "KAGGLE":
-                    base_path = Path(dataset_path)
-                    base_path = base_path / "data" / "data"
-                    train_dir = base_path / "train"
-                    test_dir = base_path / "test"
-                    self.labels_file = Path(dataset_path) / "labeled_anomalies.csv"
+                base_path = Path(dataset_path)
+                base_path = base_path / "data" / "data"
+                train_dir = base_path / "train"
+                test_dir = base_path / "test"
+                self.labels_file = Path(dataset_path) / "labeled_anomalies.csv"
 
                 if not train_dir.exists() or not test_dir.exists():
                     raise FileNotFoundError(f".npy DA NASA não encontrados em {base_path}")
@@ -159,8 +179,6 @@ class NasaDataset:
                 df_test.to_parquet(pqt_test, compression="gzip", engine="auto", index=True)
                 if self.verbose:
                     logging.info(f"Cache criado: {pqt_train} e {pqt_test}")
-            else:
-                raise Exception("SEM PARQUET NA PASTA DATASET!")
 
         except Exception as e:
             if self.verbose:
@@ -204,7 +222,7 @@ class NasaDataset:
                 )
 
             if prototype:
-                logging.info(f"  Loaded (prototype): {chan_id}  shape={arr.shape}")
+                logging.debug(f"  Loaded (prototype): {chan_id}  shape={arr.shape}")
                 # one channel is enough for prototyping
 
         # Create DataFrame with MultiIndex
@@ -272,9 +290,7 @@ class NasaDataset:
         time_idx | target | feat_0
         """
         if drop:
-            row_all_nan = (
-                df_multi["value"].groupby(level="time_idx").transform(lambda x: x.isnull().all())
-            )
+            row_all_nan = df_multi["value"].groupby(level="time_idx").transform(lambda x: x.isnull().all())
             logging.info(df_multi[row_all_nan].head(5))
             # deixa apenas os time_idx que NÃO são totalmente compostos por NaN
             df_multi = df_multi[~row_all_nan]
