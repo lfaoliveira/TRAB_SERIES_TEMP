@@ -11,7 +11,6 @@ import pandas as pd
 
 from src.config.config import ProjectSettings
 from darts import TimeSeries
-from src.data.torch_dataset import Horizons
 import ast
 from pandas import DataFrame
 
@@ -86,8 +85,8 @@ class NasaDataset:
 
         # Dataset hyperparams --------------------------------------------------
         self.frequency = ProjectSettings.dataset.dataset_frequency
-        self.input_width = Horizons.input_width(self.frequency)
-        self.output_width = Horizons.output_width(self.frequency)
+        # self.input_width = Horizons.input_width(self.frequency)
+        # self.output_width = Horizons.output_width(self.frequency)
         # self.series_normalizer = GroupNormalizer(groups=["series_id"])
 
         # Lazily built TimeSeriesDataSet objects
