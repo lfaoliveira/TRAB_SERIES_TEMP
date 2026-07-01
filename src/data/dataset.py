@@ -103,17 +103,18 @@ class NasaDataset:
         self, base_path: Path, prototype: bool = False, skip_load=True
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Carrega os arquivos M4 em wide format e cachea em Parquet."""
-        base_path.mkdir(parents=True, exist_ok=True)
-        self.labels_file = base_path / "labeled_anomalies.csv"
 
         if os.environ.get("AMBIENTE") == "KAGGLE":
             # No Kaggle, base_path já é a raiz com train/ e test/
             train_dir = base_path / "train"
             test_dir = base_path / "test"
         else:
+            base_path.mkdir(parents=True, exist_ok=True)
             base_path = base_path / "data" / "data"
             train_dir = base_path / "train"
             test_dir = base_path / "test"
+
+        self.labels_file = base_path / "labeled_anomalies.csv"
 
         download_path = base_path
         pqt_train: Path = download_path / "nasa_train.parquet"
