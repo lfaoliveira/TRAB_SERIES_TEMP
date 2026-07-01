@@ -112,22 +112,13 @@ class NasaDataset:
             base_path.mkdir(parents=True, exist_ok=True)
 
         download_path = base_path
-        pqt_train: Path = download_path / "nasa_train.parquet"
-        pqt_test: Path = download_path / "nasa_test.parquet"
 
         # Initialize variables to avoid unbound variable errors
         df_train: DataFrame
         df_test: DataFrame
 
         try:
-            if pqt_train.exists() and pqt_test.exists():
-                # se existe, tenta ler parquet
-                if self.verbose:
-                    logging.info(f"Carregando cache: {pqt_train}")
-                df_train = pd.read_parquet(pqt_train, engine="auto")
-                df_test = pd.read_parquet(pqt_test, engine="auto")
-
-            elif train_dir.exists() and test_dir.exists():
+            if train_dir.exists() and test_dir.exists():
                 # Carrega direto dos .npy
                 logging.info("Loading train split …")
                 df_train = self._load_npy_directory(train_dir, prototype=prototype)
@@ -136,11 +127,6 @@ class NasaDataset:
 
                 if df_train is None or df_test is None:
                     raise RuntimeError("Failed to load dataset: df_train or df_test is None")
-
-                df_train.to_parquet(pqt_train, compression="gzip", engine="auto", index=True)
-                df_test.to_parquet(pqt_test, compression="gzip", engine="auto", index=True)
-                if self.verbose:
-                    logging.info(f"Cache criado: {pqt_train} e {pqt_test}")
 
             else:
                 # DOWNLOAD DO DATASET
@@ -170,11 +156,6 @@ class NasaDataset:
 
                 if df_train is None or df_test is None:
                     raise RuntimeError("Failed to load dataset: df_train or df_test is None")
-
-                df_train.to_parquet(pqt_train, compression="gzip", engine="auto", index=True)
-                df_test.to_parquet(pqt_test, compression="gzip", engine="auto", index=True)
-                if self.verbose:
-                    logging.info(f"Cache criado: {pqt_train} e {pqt_test}")
 
         except Exception as e:
             if self.verbose:
