@@ -1,6 +1,9 @@
+import logging
+
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.nn.modules.loss import KLDivLoss
 from torch.distributions import Normal, kl_divergence
 from lightning import LightningModule
 
@@ -63,6 +66,11 @@ class VAE(LightningModule):
         z = self.reparameterize(mu, logvar)
         return self.decode(z)
 
+    def kl_formula(self, logvar: torch.Tensor, mu: torch.Tensor):
+        # $$\text{KL} = -0.5 \sum (1 + \log(\sigma^2) - \mu^2 - \sigma^2 )$$
+        kl = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1).mean()
+        return kl
+
     def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
         x, _ = batch
         # IGUAL FORWARD!
@@ -71,9 +79,12 @@ class VAE(LightningModule):
         x_recon = self.decode(z)
 
         recon_loss = F.mse_loss(x_recon, x, reduction="sum")
-        q = Normal(mu, logvar.mul(0.5).exp())
-        p = Normal(0, 1)
-        kl = kl_divergence(q, p).sum()
+        # logging.info(f"RECON LOSS: {recon_loss}\n")
+        # logging.info(f"MU: {mu}\n")
+        # logging.info(f"LOGVAR: {logvar.mul(0.5).exp()}\n")
+
+        # AVISO calculo direto da Divergencia KL PRA EVITAR INSTABILIDADE NUMERICA!
+        kl = self.kl_formula(logvar, mu)
         loss = recon_loss + kl
 
         self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
@@ -88,10 +99,8 @@ class VAE(LightningModule):
         x_recon = self.decode(z)
 
         recon_loss = F.mse_loss(x_recon, x, reduction="sum")
-        q = Normal(mu, logvar.mul(0.5).exp())
-        p = Normal(0, 1)
-        kl_loss = kl_divergence(q, p).sum()
-        loss = recon_loss + kl_loss
+        kl = self.kl_formula(logvar, mu)
+        loss = recon_loss + kl
 
         self.log("val_loss", loss, prog_bar=True)
         return loss
