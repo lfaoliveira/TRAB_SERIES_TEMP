@@ -8,6 +8,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from darts import TimeSeries
+from darts.utils.data.torch_datasets.training_dataset import SequentialTorchTrainingDataset
+from darts.utils.data.torch_datasets.inference_dataset import SequentialTorchInferenceDataset
 from lightning import LightningModule, Trainer
 from sklearn.metrics import average_precision_score, roc_auc_score
 from torch.utils.data import DataLoader, TensorDataset
@@ -20,7 +22,7 @@ from torchmetrics import (
     Recall,
     ROC,
 )
-
+from src.data.utils import extract_windows
 from src.models.outlier import OutlierDetector
 
 
@@ -102,43 +104,20 @@ class OutlierModelWrapper(OutlierDetector):
         ws = self.window_size
 
         # --- Train loader: janelas do treino (normais) ---
-        X_list: list[np.ndarray] = []
-        for ts in train:
-            vals = ts.values(copy=False).flatten()
-            if len(vals) < ws:
-                continue
-            for i in range(len(vals) - ws + 1):
-                X_list.append(vals[i : i + ws])
 
-        if not X_list:
-            return
-
-        X = torch.tensor(np.stack(X_list), dtype=torch.float32)
-        y = torch.zeros(len(X), dtype=torch.float32)  # todas normais
+        train_dataset = SequentialTorchTrainingDataset(test, input_chunk_length=ws, output_chunk_length=1)
+        print(f"TRAIN 0: {train_dataset[0]}")
+        test_dataset = SequentialTorchInferenceDataset(test, input_chunk_length=ws, output_chunk_length=1)
 
         train_loader = DataLoader(
-            TensorDataset(X, y),
+            train_dataset,
             batch_size=self.batch_size,
             shuffle=False,
         )
 
         # --- Val loader: janelas do teste (contêm anomalias reais) ---
-        X_val_list: list[np.ndarray] = []
-        for ts in test:
-            vals = ts.values(copy=False).flatten()
-            if len(vals) < ws:
-                continue
-            for i in range(len(vals) - ws + 1):
-                X_val_list.append(vals[i : i + ws])
-
-        if X_val_list:
-            X_val = torch.tensor(np.stack(X_val_list), dtype=torch.float32)
-            y_val = torch.zeros(len(X_val), dtype=torch.float32)
-        else:
-            X_val, y_val = X, y  # fallback seguro
-
         val_loader = DataLoader(
-            TensorDataset(X_val, y_val),
+            test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
         )

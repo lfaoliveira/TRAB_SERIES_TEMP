@@ -1,8 +1,7 @@
 import logging
 from collections.abc import Sequence
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable
 
-from lightning import LightningModule
 import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
@@ -11,147 +10,10 @@ from darts.ad.scorers import KMeansScorer
 import sklearn.ensemble
 import sklearn.neighbors
 
+from src.data.utils import extract_windows
 from src.models.outlier import OutlierDetector
 
 
-type WindowPredicate = Callable[[np.ndarray, Any], pd.Series[bool]]
-
-
-# ---------------------------------------------------------------------------
-# Utilitário centralizado de janelamento
-# ---------------------------------------------------------------------------
-
-
-def extract_windows(
-    values: np.ndarray,
-    window_size: int,
-    centered: bool = False,
-    padding_mode: str = "edge",
-) -> np.ndarray:
-    """
-    Extrai janelas deslizantes de um array 1-D.
-
-    Dois modos de operação:
-
-    - **centered=False** (padrão): retorna um array ``(n_windows, window_size)``
-      com janelas consecutivas sem stride::
-
-          windows[k] = values[k : k + window_size]
-
-      Neste modo o número de janelas é ``n_windows = n - window_size + 1``.
-
-    - **centered=True**: retorna um array ``(n, window_size)`` onde cada
-      linha *i* é uma janela centrada no ponto ``values[i]``. Quando a
-      janela extrapola as bordas da série, o padding é feito com o modo
-      indicado por *padding_mode*.
-
-    Parameters
-    ----------
-    values : np.ndarray
-        Array 1-D de valores.
-    window_size : int
-        Número de elementos por janela.
-    centered : bool
-        Se ``True``, cada ponto ganha uma janela centrada nele com padding
-        nas bordas. Se ``False`` (padrão), janelas consecutivas sem stride.
-    padding_mode : str
-        Modo de padding ``np.pad`` usado nas bordas quando ``centered=True``.
-
-    Returns
-    -------
-    np.ndarray
-        Array de janelas. Shape ``(n_windows, window_size)`` para
-        ``centered=False`` ou ``(n, window_size)`` para ``centered=True``.
-        Retorna um array vazio ``(0, window_size)`` se os dados forem
-        mais curtos que a janela no modo não-centrado.
-    """
-    values = np.asarray(values, dtype=float)
-    n = len(values)
-    ws = window_size
-
-    if not centered:
-        if n < ws:
-            return np.empty((0, ws), dtype=float)
-        return np.lib.stride_tricks.sliding_window_view(values, window_shape=ws)
-
-    # Modo centrado: cada ponto i recebe uma janela com ws elementos
-    half = ws // 2
-    windows = np.empty((n, ws), dtype=float)
-
-    for i in range(n):
-        left = i - half
-        right = i + (ws - half - 1)  # left + 1 + right == ws
-        start = max(0, left)
-        end = min(n, right + 1)
-        window = values[start:end]
-
-        if len(window) < ws:
-            pad_before = max(0, -left)
-            pad_after = max(0, right + 1 - n)
-            window = np.pad(window, (pad_before, pad_after), mode=padding_mode)
-
-        windows[i] = window
-
-    return windows
-
-
-def rolling_window_apply(
-    series_list: List[TimeSeries],
-    window_size: int,
-    predicate: WindowPredicate,
-    overlap=False,
-) -> List[np.ndarray]:
-    """
-    Aplica um rolling window de tamanho fixo sobre cada TimeSeries e avalia
-    *predicate* em cada janela, retornando um array booleano por série.
-
-    Parameters
-    ----------
-    series_list : List[TimeSeries]
-        Lista de sequências numéricas 1-D.
-    window_size : int
-        Número de observações em cada janela.
-    predicate : Callable[[np.ndarray], bool]
-        Função que recebe um np.ndarray (uma janela) e retorna bool.
-    overlap : bool
-        Se ``False`` (padrão), janelas não se sobrepõem (stride = window_size).
-
-    Returns
-    -------
-    List[np.ndarray]
-        Um np.ndarray de bool por série de entrada.
-    """
-    if window_size < 1:
-        raise ValueError(f"window_size deve ser >= 1, recebeu {window_size}")
-
-    results: List[np.ndarray] = []
-
-    for series in series_list:
-        vals = np.asarray(series.univariate_values(), dtype=float)
-        stride = 1 if overlap else window_size
-        windows = extract_windows(vals, window_size, centered=False)
-
-        if not overlap:
-            # extract_windows sem stride dá sliding window pura;
-            # queremos stride = window_size, então amostramos de stride em stride
-            windows = windows[::stride]
-
-        bool_vals = np.array([predicate(w) for w in windows], dtype=bool)
-
-        # Expande o resultado para o comprimento original via repeat
-        if not overlap:
-            n = len(vals)
-            expanded = np.full(n, False, dtype=bool)
-            for idx, w in enumerate(windows):
-                start = idx * window_size
-                end = min(start + window_size, n)
-                if bool_vals[idx]:
-                    expanded[start:end] = True
-            results.append(expanded)
-        else:
-            results.append(bool_vals)
-
-    return results
 
 
 # TODO: adaptar funcoes para que retornem array de booleanos contendo se elemento da janela eh oulier ou nao
