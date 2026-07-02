@@ -180,7 +180,7 @@ class OutlierModelWrapper(OutlierDetector):
         y_score: list[float] = []
 
         for labels, score in zip(test_labels, scores):
-            score_vals = score.values(copy=False).flatten()
+            score_vals = np.nan_to_num(score.values(copy=False).flatten(), nan=0.0)
             y_true.extend(labels.tolist())
             y_score.extend(score_vals.tolist())
 
