@@ -1,3 +1,4 @@
+import gc
 import logging
 from collections.abc import Sequence
 from typing import Any, Optional
@@ -157,6 +158,7 @@ class OutlierModelWrapper(OutlierDetector):
                 enable_progress_bar=True,
             )
             trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+            gc.collect()
 
     def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
         """
