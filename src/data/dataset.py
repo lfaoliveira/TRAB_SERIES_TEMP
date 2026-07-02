@@ -4,7 +4,7 @@ import logging
 import os
 from pathlib import Path
 import traceback
-from typing import Tuple
+from typing import Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -13,6 +13,7 @@ from src.config.config import ProjectSettings
 from darts import TimeSeries
 import ast
 from pandas import DataFrame
+from darts.utils.model_selection import train_test_split
 
 
 class NasaDataset:
@@ -53,6 +54,7 @@ class NasaDataset:
         self,
         base_path: Path,
         normalize: bool = False,
+        train_split: float = 0.8,
         export_path: Path = Path(".", "exports"),
         verbose=False,
     ) -> None:
@@ -74,7 +76,7 @@ class NasaDataset:
             self.labels_df[:10_000].to_csv(export_path / "./labels.csv")
 
         # Convert to long format -----------------------------------------------
-        self.df_test, self.tam_dataset = self.multi_to_df(test_wide, include_labels=True)
+        self.df_test, self.tam_dataset = self.multi_to_df(test_wide, include_labels=True, drop=True)
         if prototype:
             self.df_test[:10_000].to_csv(export_path / "./test.csv")
 
@@ -82,6 +84,9 @@ class NasaDataset:
         self.feature_cols = [
             col for col in self.df_test.columns if col not in ["series_id", "time_idx", "target"]
         ]
+
+        splitados = self.splitar(train_split)
+        self.train_values, self.test_values, self.train_labels, self.test_labels = splitados
 
         # Dataset hyperparams --------------------------------------------------
         self.frequency = ProjectSettings.dataset.dataset_frequency
@@ -91,7 +96,6 @@ class NasaDataset:
 
         # Lazily built TimeSeriesDataSet objects
         self.train_dataset = None
-        self.val_dataset = None
         self.test_dataset = None
 
     # ------------------------------------------------------------------
@@ -276,7 +280,7 @@ class NasaDataset:
         # 1. Faz o unstack para trazer o 'feat_0' para as colunas
         df_wide = df_multi["value"].unstack(level="feature_id")
 
-        # 3. Reseta o índice para mover 'series_id' e 'time_idx' de volta como colunas comuns
+        # 3. Reseta o índice para mover 'series_id' e 'time_idx' de volta como colunas comuns e ORDENA
         df_wide = df_wide.reset_index().sort_values(by=["series_id", "time_idx"])
 
         # 5. Se include_labels for True, cria a coluna de target
@@ -317,43 +321,46 @@ class NasaDataset:
 
         return df_wide, tam_dataset
 
+    def splitar(
+        self, train_split: float
+    ) -> tuple[Sequence[TimeSeries], Sequence[TimeSeries], Sequence[TimeSeries], Sequence[TimeSeries]]:
+
+        logging.info(f"DF TEST: {self.df_test}")
+        logging.info(f"COLUNAS: {self.df_test.columns}")
+        dataset = TimeSeries.from_group_dataframe(
+            self.df_test,
+            group_cols="series_id",
+            time_col="time_idx",
+            value_cols=self.feature_cols,
+        )
+        train_series, test_series = train_test_split(dataset, test_size=1 - train_split, lazy=False)
+
+        labels = TimeSeries.from_group_dataframe(
+            self.df_test,
+            group_cols="series_id",
+            time_col="time_idx",
+            value_cols="target",
+        )
+
+        train_labels, test_labels = train_test_split(labels, test_size=1 - train_split, lazy=False)
+        return (train_series, test_series, train_labels, test_labels)  # pyright: ignore[reportReturnType]
+
     # ------------------------------------------------------------------
     # TimeSeriesDataSet builders
     # ------------------------------------------------------------------
 
-    def build_train_dataset(self) -> list[TimeSeries]:
-        logging.info(f"DF TEST: {self.df_test}")
-        logging.info(f"COLUNAS: {self.df_test.columns}")
-        self.train_dataset = TimeSeries.from_group_dataframe(
-            self.df_test,
-            group_cols="series_id",
-            time_col="time_idx",
-            value_cols=self.feature_cols,
-        )
-
-        return self.train_dataset
+    def build_train_dataset(
+        self, labels=True
+    ) -> Sequence[TimeSeries] | tuple[Sequence[TimeSeries], Sequence[TimeSeries]]:
+        if labels:
+            return self.train_values, self.train_labels
+        else:
+            return self.train_values
 
     def build_test_dataset(
-        self,
-    ) -> list[TimeSeries]:
-        """Build the test TimeSeries using the same telemetry features as train."""
-        self.test_dataset = TimeSeries.from_group_dataframe(
-            self.df_test,
-            group_cols="series_id",
-            time_col="time_idx",
-            value_cols=self.feature_cols,
-        )
-        return self.test_dataset
-
-    def build_test_labels(self) -> list[np.ndarray]:
-        """Return the ground-truth anomaly labels (0/1) per series as a list of 1-D arrays.
-
-        Each array has length equal to the number of time steps of that series
-        in df_test, perfectly aligned with the series returned by
-        ``build_test_dataset``.
-        """
-        labels_list = []
-        for series_id, group in self.df_test.groupby("series_id", sort=False):
-            group = group.sort_values("time_idx")
-            labels_list.append(group["target"].values.astype(np.float64))
-        return labels_list
+        self, labels=True
+    ) -> Sequence[TimeSeries] | tuple[Sequence[TimeSeries], Sequence[TimeSeries]]:
+        if labels:
+            return self.test_values, self.test_labels
+        else:
+            return self.test_values
