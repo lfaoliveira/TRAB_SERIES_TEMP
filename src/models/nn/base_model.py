@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from typing import Any, Optional
 
 import numpy as np
@@ -29,8 +30,8 @@ class OutlierModelWrapper(OutlierDetector):
     Adere à interface ``OutlierDetector`` (train → test_scorer → metrics),
     permitindo o uso no pipeline ``apply()``.
 
-    Subclasses devem definir ``self.model`` (um ``nn.Module`` que retorna
-    um único logit por amostra).
+    Subclasses devem popular ``self.model_dict`` (um ``dict[str, LightningModule]``
+    onde cada entrada é um sub-modelo nomeado).
 
     Nota
     ----
@@ -42,7 +43,7 @@ class OutlierModelWrapper(OutlierDetector):
     def __init__(
         self,
         input_dim: int,
-        pl_model: Optional[LightningModule] = None,
+        model_dict: Optional[dict[str, LightningModule]] = None,
         window_size: int = 20,
         lr: float = 1e-3,
         pos_weight: float = 1.0,
@@ -58,7 +59,7 @@ class OutlierModelWrapper(OutlierDetector):
         self.batch_size = batch_size
         self.max_epochs = max_epochs
         self._accelerator = accelerator
-        self.pl_model = pl_model
+        self.model_dict = model_dict
 
         self.val_metrics = MetricCollection(
             {
@@ -79,31 +80,28 @@ class OutlierModelWrapper(OutlierDetector):
         )
 
     def pipeline(
-        self, train: list[TimeSeries], test: list[TimeSeries], test_labels: np.ndarray
-    ) -> dict[str, Any]:
+        self, train: list[TimeSeries], test: list[TimeSeries], test_labels: Sequence[TimeSeries]
+    ) -> dict[str, dict[str, Any]]:
         return OutlierDetector.apply(self, train, test, test_labels)
 
     def fit(
         self,
         train: list[TimeSeries],
-        pl_model: Optional[LightningModule | None] = None,
+        test: list[TimeSeries],
     ) -> None:
         """
         Converte as séries de treino em janelas deslizantes (rótulo 0 —
-        normal) e executa o Trainer do Lightning.
+        normal) e as séries de teste em janelas para validação.
 
-        O parâmetro ``mode`` é herdado de ``nn.Module.train(mode)`` e
-        deve ser passado como keyword-only. Quando chamado pelo pipeline
-        ``apply()``, apenas a série é fornecida.
+        O dataset de teste é usado como validação para que o modelo veja
+        padrões anômalos durante o treinamento, permitindo early stopping
+        baseado em desempenho real de detecção.
         """
-        model = pl_model or self.pl_model
-        if model is None:
-            logging.info("PL MODEL NULO — pulando fit")
-            raise RuntimeError("PL MODEL NULO")
 
         ws = self.window_size
-        X_list: list[np.ndarray] = []
 
+        # --- Train loader: janelas do treino (normais) ---
+        X_list: list[np.ndarray] = []
         for ts in train:
             vals = ts.values(copy=False).flatten()
             if len(vals) < ws:
@@ -115,79 +113,119 @@ class OutlierModelWrapper(OutlierDetector):
             return
 
         X = torch.tensor(np.stack(X_list), dtype=torch.float32)
-        # Todas as janelas de treino são consideradas "normais"
-        y = torch.zeros(len(X), dtype=torch.float32)
+        y = torch.zeros(len(X), dtype=torch.float32)  # todas normais
 
-        loader = DataLoader(
+        train_loader = DataLoader(
             TensorDataset(X, y),
             batch_size=self.batch_size,
             shuffle=False,
         )
 
-        trainer = Trainer(
-            max_epochs=self.max_epochs,
-            accelerator=self._accelerator,
-            enable_checkpointing=False,
-            logger=True,
-            enable_progress_bar=True,
+        # --- Val loader: janelas do teste (contêm anomalias reais) ---
+        X_val_list: list[np.ndarray] = []
+        for ts in test:
+            vals = ts.values(copy=False).flatten()
+            if len(vals) < ws:
+                continue
+            for i in range(len(vals) - ws + 1):
+                X_val_list.append(vals[i : i + ws])
+
+        if X_val_list:
+            X_val = torch.tensor(np.stack(X_val_list), dtype=torch.float32)
+            y_val = torch.zeros(len(X_val), dtype=torch.float32)
+        else:
+            X_val, y_val = X, y  # fallback seguro
+
+        val_loader = DataLoader(
+            TensorDataset(X_val, y_val),
+            batch_size=self.batch_size,
+            shuffle=False,
         )
-        trainer.fit(model, loader)
 
-    def test_scorer(
-        self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
-    ) -> list[TimeSeries]:
+        assert self.model_dict is not None
+        for name, model in self.model_dict.items():
+            if model is None:
+                logging.info(f"PL MODEL NULO — chave '{name}' — pulando fit")
+                continue
+
+            logging.info(f"Treinando modelo '{name}' …")
+            trainer = Trainer(
+                max_epochs=self.max_epochs,
+                accelerator=self._accelerator,
+                enable_checkpointing=False,
+                logger=True,
+                enable_progress_bar=True,
+            )
+            trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+
+    def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
         """
-        Para cada série, calcula o score de anomalia via erro de reconstrução (MSE)
-        em janelas deslizantes centradas. Retorna uma TimeSeries de scores por série.
+        Para cada modelo em ``model_dict``, calcula o score de anomalia via
+        erro de reconstrução (MSE) em janelas deslizantes centradas.
+
+        Retorna um dicionário ``{nome_do_modelo: list[TimeSeries]}``.
         """
-        model = pl_model or self.pl_model
-        if model is None:
-            logging.info("PL MODEL NULO!")
-            return []
+        result: dict[str, list[TimeSeries]] = {}
 
-        ws = self.window_size
-        scores: list[TimeSeries] = []
-        model.eval()
+        assert self.model_dict is not None
+        for name, model in self.model_dict.items():
+            if model is None:
+                logging.info(f"PL MODEL NULO — chave '{name}' — pulando")
+                continue
 
-        with torch.no_grad():
-            for ts in test:
-                vals = ts.values(copy=False).flatten()
-                n = len(vals)
-                score_vals = np.full(n, 0.0, dtype=float)
+            ws = self.window_size
+            scores: list[TimeSeries] = []
+            model.eval()
 
-                if n < ws:
+            with torch.no_grad():
+                for ts in test:
+                    vals = ts.values(copy=False).flatten()
+                    n = len(vals)
+                    score_vals = np.full(n, 0.0, dtype=float)
+
+                    if n < ws:
+                        scores.append(TimeSeries.from_values(score_vals))
+                        continue
+
+                    # Padding reflexivo nas bordas para janelas centradas
+                    half = ws // 2
+                    padded = np.pad(vals, (half, ws - half - 1), mode="edge")
+
+                    for i in range(n):
+                        window = padded[i : i + ws]
+                        x = torch.tensor(window, dtype=torch.float32).unsqueeze(0)
+                        recon = model(x)  # (1, input_dim)
+                        # AVISO: ver se esse MSE faz sentido para todos os modelos!
+                        mse = F.mse_loss(recon, x, reduction="none").mean().item()
+                        score_vals[i] = mse
+
                     scores.append(TimeSeries.from_values(score_vals))
-                    continue
 
-                # Padding reflexivo nas bordas para janelas centradas
-                half = ws // 2
-                padded = np.pad(vals, (half, ws - half - 1), mode="edge")
+            result[name] = scores
 
-                for i in range(n):
-                    window = padded[i : i + ws]
-                    x = torch.tensor(window, dtype=torch.float32).unsqueeze(0)
-                    recon = model(x)  # (1, input_dim)
-                    # AVISO: ver se esse MSE faz sentido para todos os modelos!
-                    mse = F.mse_loss(recon, x, reduction="none").mean().item()
-                    score_vals[i] = mse
+        return result
 
-                scores.append(TimeSeries.from_values(score_vals))
+    def metrics(
+        self, test_labels: Sequence[TimeSeries], scores: dict[str, list[TimeSeries]]
+    ) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
 
-        return scores
+        for name, model_scores in scores.items():
+            y_true: list[int] = []
+            y_score: list[float] = []
 
-    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]) -> dict[str, Any]:
-        y_true: list[int] = []
-        y_score: list[float] = []
+            for label_ts, score_ts in zip(test_labels, model_scores):
+                labels = label_ts.values(copy=False).flatten()
+                score_vals = np.nan_to_num(score_ts.values(copy=False).flatten(), nan=0.0)
+                y_true.extend(labels.astype(int).tolist())
+                y_score.extend(score_vals.tolist())
 
-        for labels, score in zip(test_labels, scores):
-            score_vals = np.nan_to_num(score.values(copy=False).flatten(), nan=0.0)
-            y_true.extend(labels.tolist())
-            y_score.extend(score_vals.tolist())
+            auc_roc = float(roc_auc_score(y_true, y_score))
+            auc_pr = float(average_precision_score(y_true, y_score))
 
-        auc_roc = float(roc_auc_score(y_true, y_score))
-        auc_pr = float(average_precision_score(y_true, y_score))
+            result[name] = {"name": name, "auc_roc": auc_roc, "auc_pr": auc_pr}
 
-        return {"name": self.__class__.__name__, "auc_roc": auc_roc, "auc_pr": auc_pr}
+        return result
 
     # ------------------------------------------------------------------
     # LightningModule

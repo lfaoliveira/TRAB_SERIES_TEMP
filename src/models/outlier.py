@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from typing import Any, Optional
 
 from lightning import LightningModule
@@ -8,22 +9,14 @@ from darts import TimeSeries
 
 
 class OutlierDetector(ABC):
-    pl_model: Optional[LightningModule] = None
-    # NOTE: COMENTADO POIS NEM TODOS MODELOS USAM JANELAMENTO!
-    # def __init__(
-    #     self, group_id: str = "series_id", target_id: str = "target", window_size=7
-    # ) -> None:
-    #     super().__init__()
-    #     self.window_size = window_size
-    #     self.group_id = group_id
-    #     self.target_id = target_id
+    model_dict: Optional[dict[str, LightningModule]] = None
 
     def apply(
-        self, train: list[TimeSeries], test: list[TimeSeries], test_labels: np.ndarray
-    ) -> dict[str, Any]:
+        self, train: list[TimeSeries], test: list[TimeSeries], test_labels: Sequence[TimeSeries]
+    ) -> dict[str, dict[str, Any]]:
         logging.info(f"MODELO: {self.__class__.__name__}")
         logging.info("TREINANDO ...")
-        self.fit(train)
+        self.fit(train, test)
         logging.info("TESTANDO ...")
         scores = self.test_scorer(test)
         logging.info("METRIFICANDO ...")
@@ -32,13 +25,15 @@ class OutlierDetector(ABC):
         return metrics
 
     @abstractmethod
-    def fit(self, train: list[TimeSeries]):
+    def fit(self, train: list[TimeSeries], test: list[TimeSeries]):
         pass
 
     @abstractmethod
-    def test_scorer(self, test: list[TimeSeries]) -> list[TimeSeries]:
+    def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
         pass
 
     @abstractmethod
-    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]) -> dict[str, Any]:
+    def metrics(
+        self, test_labels: Sequence[TimeSeries], scores: dict[str, list[TimeSeries]]
+    ) -> dict[str, dict[str, Any]]:
         pass

@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from typing import Any, Callable, List, Optional
 
 from lightning import LightningModule
@@ -154,23 +155,23 @@ def rolling_window_apply(
 
 
 # TODO: adaptar funcoes para que retornem array de booleanos contendo se elemento da janela eh oulier ou nao
-def threshold_mean(threshold: float) -> WindowPredicate:
-    return lambda w: w.mean() > threshold
+# def threshold_mean(threshold: float) -> WindowPredicate:
+#     return lambda w: w.mean() > threshold
 
 
-def any_above(series: pd.Series | None = None, threshold: float = 0) -> pd.Series:
-    if series is not None:
-        return series > threshold
-    else:
-        return pd.Series(np.array([False], dtype=bool))
+# def any_above(series: pd.Series | None = None, threshold: float = 0) -> pd.Series:
+#     if series is not None:
+#         return series > threshold
+#     else:
+#         return pd.Series(np.array([False], dtype=bool))
 
 
-def is_monotone_increasing() -> WindowPredicate:
-    return lambda w: w.is_monotonic_increasing
+# def is_monotone_increasing() -> WindowPredicate:
+#     return lambda w: w.is_monotonic_increasing
 
 
-def std_below(max_std: float) -> WindowPredicate:
-    return lambda w: w.std() < max_std
+# def std_below(max_std: float) -> WindowPredicate:
+#     return lambda w: w.std() < max_std
 
 
 # ---------------------------------------------------------------------------
@@ -199,37 +200,42 @@ class KMeans(OutlierDetector):
         )
         self.threshold = threshold
 
-    def fit(self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None) -> None:
+    def fit(self, train: list[TimeSeries], test: list[TimeSeries]) -> None:
         self.scorer.fit(train)
 
-    def test_scorer(self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None):
+    def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
         if self.scorer is None:
             raise RuntimeError("KMeans must be trained before scoring.")
 
         scores: list[TimeSeries] = [self.scorer.score(ts) for ts in test]  # type: ignore
-        return scores
+        return {self.__class__.__name__: scores}
 
-    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]):
-        y_true = []
-        y_score = []
-        for labels, score in zip(test_labels, scores):
-            score_vals = score.values(copy=False).flatten()
-            # O score tem window-1 valores a menos que os labels no início
-            # (as primeiras window-1 posições não formam uma janela completa)
-            n_warmup = len(labels) - len(score_vals)
-            labels_aligned = labels[n_warmup:]
-            assert len(labels_aligned) == len(score_vals), (
-                f"labels {len(labels_aligned)} != scores {len(score_vals)} (warmup={n_warmup})"
-            )
-            y_true.extend(labels_aligned)
-            y_score.extend(score_vals)
+    def metrics(
+        self, test_labels: Sequence[TimeSeries], scores: dict[str, list[TimeSeries]]
+    ) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for name, model_scores in scores.items():
+            y_true = []
+            y_score = []
+            for label_ts, score in zip(test_labels, model_scores):
+                labels = label_ts.values(copy=False).flatten().astype(int)
+                score_vals = score.values(copy=False).flatten()
+                # O score tem window-1 valores a menos que os labels no início
+                n_warmup = len(labels) - len(score_vals)
+                labels_aligned = labels[n_warmup:]
+                assert len(labels_aligned) == len(score_vals), (
+                    f"labels {len(labels_aligned)} != scores {len(score_vals)} (warmup={n_warmup})"
+                )
+                y_true.extend(labels_aligned.tolist())
+                y_score.extend(score_vals.tolist())
 
-        auc_roc = roc_auc_score(y_true, y_score)
-        auc_pr = average_precision_score(y_true, y_score)
+            auc_roc = roc_auc_score(y_true, y_score)
+            auc_pr = average_precision_score(y_true, y_score)
 
-        logging.info(f"AUC-ROC: {auc_roc:.4f}")
-        logging.info(f"AUC-PR : {auc_pr:.4f}")
-        return {"name": self.__class__.__name__, "auc_roc": auc_roc, "auc_pr": auc_pr}
+            logging.info(f"[{name}] AUC-ROC: {auc_roc:.4f} | AUC-PR: {auc_pr:.4f}")
+            result[name] = {"name": name, "auc_roc": auc_roc, "auc_pr": auc_pr}
+
+        return result
 
 
 class Hampel(OutlierDetector):
@@ -244,19 +250,16 @@ class Hampel(OutlierDetector):
         self.window_size = window_size
         self.n_sigmas = n_sigmas
 
-    def fit(self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None):
+    def fit(self, train: list[TimeSeries], test: list[TimeSeries]):
         # Filtro de Hampel é não-supervisionado e sem estado — nada a treinar
         pass
 
-    def test_scorer(
-        self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
-    ) -> list[TimeSeries]:
+    def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
         """
         Para cada TimeSeries, computa um escore contínuo de anomalia:
         |x_i - mediana_local| / sigma_local.
         Quanto maior o escore, mais anômalo o ponto.
         """
-
         scores: list[TimeSeries] = []
 
         for ts in test:
@@ -272,23 +275,29 @@ class Hampel(OutlierDetector):
 
             scores.append(TimeSeries.from_values(score_vals))
 
-        return scores
+        return {self.__class__.__name__: scores}
 
-    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]):
-        y_true = []
-        y_score = []
-        for labels, score in zip(test_labels, scores):
-            score_vals = score.values(copy=False).flatten()
-            # Hampel produz score para todo ponto (mesmo comprimento dos labels)
-            y_true.extend(labels)
-            y_score.extend(score_vals)
+    def metrics(
+        self, test_labels: Sequence[TimeSeries], scores: dict[str, list[TimeSeries]]
+    ) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for name, model_scores in scores.items():
+            y_true = []
+            y_score = []
+            for label_ts, score in zip(test_labels, model_scores):
+                labels = label_ts.values(copy=False).flatten().astype(int)
+                score_vals = score.values(copy=False).flatten()
+                # Hampel produz score para todo ponto (mesmo comprimento dos labels)
+                y_true.extend(labels.tolist())
+                y_score.extend(score_vals.tolist())
 
-        auc_roc = roc_auc_score(y_true, y_score)
-        auc_pr = average_precision_score(y_true, y_score)
+            auc_roc = roc_auc_score(y_true, y_score)
+            auc_pr = average_precision_score(y_true, y_score)
 
-        logging.info(f"AUC-ROC: {auc_roc:.4f}")
-        logging.info(f"AUC-PR : {auc_pr:.4f}")
-        return {"name": self.__class__.__name__, "auc_roc": auc_roc, "auc_pr": auc_pr}
+            logging.info(f"[{name}] AUC-ROC: {auc_roc:.4f} | AUC-PR: {auc_pr:.4f}")
+            result[name] = {"name": name, "auc_roc": auc_roc, "auc_pr": auc_pr}
+
+        return result
 
 
 class LocalOutlierFactor(OutlierDetector):
@@ -315,7 +324,7 @@ class LocalOutlierFactor(OutlierDetector):
         self.model: sklearn.neighbors.LocalOutlierFactor | None = None
         self._n_features: int = 0
 
-    def fit(self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None):
+    def fit(self, train: list[TimeSeries], test: list[TimeSeries]):
         ws = self.window_size
         X_train: list[np.ndarray] = []
         for ts in train:
@@ -339,9 +348,7 @@ class LocalOutlierFactor(OutlierDetector):
         )
         self.model.fit(X)
 
-    def test_scorer(
-        self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
-    ) -> list[TimeSeries]:
+    def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
         if self.model is None:
             raise RuntimeError("LocalOutlierFactor must be trained before scoring.")
 
@@ -356,22 +363,28 @@ class LocalOutlierFactor(OutlierDetector):
             score_vals = -self.model.score_samples(windows).ravel()
             scores.append(TimeSeries.from_values(score_vals))
 
-        return scores
+        return {self.__class__.__name__: scores}
 
-    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]):
-        y_true = []
-        y_score = []
-        for labels, score in zip(test_labels, scores):
-            score_vals = score.values(copy=False).flatten()
-            y_true.extend(labels)
-            y_score.extend(score_vals)
+    def metrics(
+        self, test_labels: Sequence[TimeSeries], scores: dict[str, list[TimeSeries]]
+    ) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for name, model_scores in scores.items():
+            y_true = []
+            y_score = []
+            for label_ts, score in zip(test_labels, model_scores):
+                labels = label_ts.values(copy=False).flatten().astype(int)
+                score_vals = score.values(copy=False).flatten()
+                y_true.extend(labels.tolist())
+                y_score.extend(score_vals.tolist())
 
-        auc_roc = roc_auc_score(y_true, y_score)
-        auc_pr = average_precision_score(y_true, y_score)
+            auc_roc = roc_auc_score(y_true, y_score)
+            auc_pr = average_precision_score(y_true, y_score)
 
-        logging.info(f"AUC-ROC: {auc_roc:.4f}")
-        logging.info(f"AUC-PR : {auc_pr:.4f}")
-        return {"name": self.__class__.__name__, "auc_roc": auc_roc, "auc_pr": auc_pr}
+            logging.info(f"[{name}] AUC-ROC: {auc_roc:.4f} | AUC-PR: {auc_pr:.4f}")
+            result[name] = {"name": name, "auc_roc": auc_roc, "auc_pr": auc_pr}
+
+        return result
 
 
 class IsolationForest(OutlierDetector):
@@ -399,7 +412,7 @@ class IsolationForest(OutlierDetector):
         self.model: sklearn.ensemble.IsolationForest | None = None
         self._n_features: int = 0
 
-    def fit(self, train: list[TimeSeries], pl_model: Optional[LightningModule | None] = None):
+    def fit(self, train: list[TimeSeries], test: list[TimeSeries]):
         ws = self.window_size
         X_train: list[np.ndarray] = []
         for ts in train:
@@ -422,9 +435,7 @@ class IsolationForest(OutlierDetector):
         )
         self.model.fit(X)
 
-    def test_scorer(
-        self, test: list[TimeSeries], pl_model: Optional[LightningModule | None] = None
-    ) -> list[TimeSeries]:
+    def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
         if self.model is None:
             raise RuntimeError("IsolationForest must be trained before scoring.")
 
@@ -437,19 +448,25 @@ class IsolationForest(OutlierDetector):
             score_vals = -self.model.decision_function(windows).ravel()
             scores.append(TimeSeries.from_values(score_vals))
 
-        return scores
+        return {self.__class__.__name__: scores}
 
-    def metrics(self, test_labels: np.ndarray, scores: list[TimeSeries]):
-        y_true = []
-        y_score = []
-        for labels, score in zip(test_labels, scores):
-            score_vals = score.values(copy=False).flatten()
-            y_true.extend(labels)
-            y_score.extend(score_vals)
+    def metrics(
+        self, test_labels: Sequence[TimeSeries], scores: dict[str, list[TimeSeries]]
+    ) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for name, model_scores in scores.items():
+            y_true = []
+            y_score = []
+            for label_ts, score in zip(test_labels, scores):
+                labels = label_ts.values(copy=False).flatten().astype(int)
+                score_vals = score.values(copy=False).flatten()
+                y_true.extend(labels.tolist())
+                y_score.extend(score_vals.tolist())
 
-        auc_roc = roc_auc_score(y_true, y_score)
-        auc_pr = average_precision_score(y_true, y_score)
+            auc_roc = roc_auc_score(y_true, y_score)
+            auc_pr = average_precision_score(y_true, y_score)
 
-        logging.info(f"AUC-ROC: {auc_roc:.4f}")
-        logging.info(f"AUC-PR : {auc_pr:.4f}")
-        return {"name": self.__class__.__name__, "auc_roc": auc_roc, "auc_pr": auc_pr}
+            logging.info(f"AUC-ROC: {auc_roc:.4f}")
+            logging.info(f"AUC-PR : {auc_pr:.4f}")
+            result[name] = {"name": name, "auc_roc": auc_roc, "auc_pr": auc_pr}
+        return result
