@@ -12,7 +12,7 @@ wheels/
 imagens
 .env
 
-data/*
+dataset/*
 export/
 output/
 .install_complete
