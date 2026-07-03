@@ -15,6 +15,7 @@ class VAE(LightningModule):
     The model learns to reconstruct normal patterns; anomaly detection is done
     by thresholding the reconstruction error (MSE) at inference time.
     """
+    #AVISO: VAE PRECISA APENAS DOS DADOS NORMAIS PARA APRENDER
 
     def __init__(
         self,
