@@ -1,39 +1,18 @@
 import logging
 from collections.abc import Sequence
-from typing import Any, Callable
 
 import numpy as np
-import pandas as pd
-from sklearn.metrics import average_precision_score, roc_auc_score
 from darts import TimeSeries
 from darts.ad.scorers import KMeansScorer
 import sklearn.ensemble
 import sklearn.neighbors
+from sklearn.metrics import average_precision_score, roc_auc_score
 
 from src.data.utils import extract_windows
-from src.models.outlier import OutlierDetector
+from src.models.outlier import DetectionMetricSummary, OutlierDetector, ScoreSeriesMap
 
 
 
-
-# TODO: adaptar funcoes para que retornem array de booleanos contendo se elemento da janela eh oulier ou nao
-# def threshold_mean(threshold: float) -> WindowPredicate:
-#     return lambda w: w.mean() > threshold
-
-
-# def any_above(series: pd.Series | None = None, threshold: float = 0) -> pd.Series:
-#     if series is not None:
-#         return series > threshold
-#     else:
-#         return pd.Series(np.array([False], dtype=bool))
-
-
-# def is_monotone_increasing() -> WindowPredicate:
-#     return lambda w: w.is_monotonic_increasing
-
-
-# def std_below(max_std: float) -> WindowPredicate:
-#     return lambda w: w.std() < max_std
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +44,7 @@ class KMeans(OutlierDetector):
     def fit(self, train: list[TimeSeries], test: list[TimeSeries]) -> None:
         self.scorer.fit(train)
 
-    def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
+    def test_scorer(self, test: list[TimeSeries]) -> ScoreSeriesMap:
         if self.scorer is None:
             raise RuntimeError("KMeans must be trained before scoring.")
 
@@ -73,9 +52,9 @@ class KMeans(OutlierDetector):
         return {self.__class__.__name__: scores}
 
     def metrics(
-        self, test_labels: Sequence[TimeSeries], scores: dict[str, list[TimeSeries]]
-    ) -> dict[str, dict[str, Any]]:
-        result: dict[str, dict[str, Any]] = {}
+        self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap
+    ) -> dict[str, DetectionMetricSummary]:
+        result: dict[str, DetectionMetricSummary] = {}
         for name, model_scores in scores.items():
             y_true = []
             y_score = []
@@ -116,7 +95,7 @@ class Hampel(OutlierDetector):
         # Filtro de Hampel é não-supervisionado e sem estado — nada a treinar
         pass
 
-    def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
+    def test_scorer(self, test: list[TimeSeries]) -> ScoreSeriesMap:
         """
         Para cada TimeSeries, computa um escore contínuo de anomalia:
         |x_i - mediana_local| / sigma_local.
@@ -140,9 +119,9 @@ class Hampel(OutlierDetector):
         return {self.__class__.__name__: scores}
 
     def metrics(
-        self, test_labels: Sequence[TimeSeries], scores: dict[str, list[TimeSeries]]
-    ) -> dict[str, dict[str, Any]]:
-        result: dict[str, dict[str, Any]] = {}
+        self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap
+    ) -> dict[str, DetectionMetricSummary]:
+        result: dict[str, DetectionMetricSummary] = {}
         for name, model_scores in scores.items():
             y_true = []
             y_score = []
@@ -210,7 +189,7 @@ class LocalOutlierFactor(OutlierDetector):
         )
         self.model.fit(X)
 
-    def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
+    def test_scorer(self, test: list[TimeSeries]) -> ScoreSeriesMap:
         if self.model is None:
             raise RuntimeError("LocalOutlierFactor must be trained before scoring.")
 
@@ -228,9 +207,9 @@ class LocalOutlierFactor(OutlierDetector):
         return {self.__class__.__name__: scores}
 
     def metrics(
-        self, test_labels: Sequence[TimeSeries], scores: dict[str, list[TimeSeries]]
-    ) -> dict[str, dict[str, Any]]:
-        result: dict[str, dict[str, Any]] = {}
+        self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap
+    ) -> dict[str, DetectionMetricSummary]:
+        result: dict[str, DetectionMetricSummary] = {}
         for name, model_scores in scores.items():
             y_true = []
             y_score = []
@@ -297,7 +276,7 @@ class IsolationForest(OutlierDetector):
         )
         self.model.fit(X)
 
-    def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
+    def test_scorer(self, test: list[TimeSeries]) -> ScoreSeriesMap:
         if self.model is None:
             raise RuntimeError("IsolationForest must be trained before scoring.")
 
@@ -313,13 +292,13 @@ class IsolationForest(OutlierDetector):
         return {self.__class__.__name__: scores}
 
     def metrics(
-        self, test_labels: Sequence[TimeSeries], scores: dict[str, list[TimeSeries]]
-    ) -> dict[str, dict[str, Any]]:
-        result: dict[str, dict[str, Any]] = {}
+        self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap
+    ) -> dict[str, DetectionMetricSummary]:
+        result: dict[str, DetectionMetricSummary] = {}
         for name, model_scores in scores.items():
             y_true = []
             y_score = []
-            for label_ts, score in zip(test_labels, scores):
+            for label_ts, score in zip(test_labels, model_scores):
                 labels = label_ts.values(copy=False).flatten().astype(int)
                 score_vals = score.values(copy=False).flatten()
                 y_true.extend(labels.tolist())
