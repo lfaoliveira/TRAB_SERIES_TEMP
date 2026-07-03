@@ -8,6 +8,8 @@ from typing import Sequence, Tuple
 
 import numpy as np
 import pandas as pd
+import torch
+from torch.utils.data import Dataset
 
 from src.config.config import ProjectSettings
 from darts import TimeSeries
@@ -93,10 +95,6 @@ class NasaDataset:
         # self.input_width = Horizons.input_width(self.frequency)
         # self.output_width = Horizons.output_width(self.frequency)
         # self.series_normalizer = GroupNormalizer(groups=["series_id"])
-
-        # Lazily built TimeSeriesDataSet objects
-        self.train_dataset = None
-        self.test_dataset = None
 
     # ------------------------------------------------------------------
     # Loading
@@ -364,3 +362,59 @@ class NasaDataset:
             return self.test_values, self.test_labels
         else:
             return self.test_values
+
+
+class SlidingWindowDataset(Dataset):
+    """
+    Dataset PyTorch que transforma uma lista de séries temporais em
+    janelas deslizantes de tamanho fixo de forma eficiente.
+    """
+
+    def __init__(self, series_list: list, window_size: int):
+        self.window_size = window_size
+        self.windows = []
+
+        for ts in series_list:
+            # Garante que estamos extraindo os valores brutos como array 1D
+            if hasattr(ts, "values"):
+                arr = ts.values(copy=False).flatten()
+            else:
+                arr = np.asarray(ts).flatten()
+
+            # Filtra séries mais curtas que a janela desejada
+            if len(arr) < window_size:
+                continue
+
+            """ Cria janelas deslizantes sem duplicar os dados na memória (O(1) memory)
+             Para um array de tamanho N, gera (N - window_size + 1) janelas. 
+             O número de janelas possíveis é sempre (N - window_size + 1) """
+            shape = (arr.size - window_size + 1, window_size)
+            # quantidade de bytes para pular para a próxima linha / coluna
+            strides = (arr.strides[0], arr.strides[0])
+            # cria matriz linearizada em memória (para cada série temporal)
+            ts_windows = np.lib.stride_tricks.as_strided(arr, shape=shape, strides=strides)
+
+            self.windows.append(ts_windows)
+            """
+            Ex:
+            Linha 0 (Janela 1): [10, 20, 30]
+            Linha 1 (Janela 2): [20, 30, 40]
+            Linha 2 (Janela 3): [30, 40, 50]
+            """
+
+        # Concatena todas as janelas de todas as séries em uma única matriz
+        if self.windows:
+            """ O np.concatenate(..., axis=0) pega todas essas matrizes e as 
+            "empilha" verticalmente (uma embaixo da outra). """
+            self.windows = np.concatenate(self.windows, axis=0)
+        else:
+            self.windows = np.empty((0, window_size), dtype=np.float32)
+
+    def __len__(self):
+        return len(self.windows)
+
+    def __getitem__(self, idx):
+        # Retorna a janela como tensor. Para modelos de reconstrução (Autoencoders, VAE, TCN),
+        # a entrada e o alvo (X e Y) são a própria janela ou uma cópia dela.
+        window = torch.tensor(self.windows[idx], dtype=torch.float32)
+        return window, window  # Retorna (X, Y) para o Lightning não reclamar

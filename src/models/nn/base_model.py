@@ -1,18 +1,18 @@
 import gc
 import logging
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Optional, cast
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from darts import TimeSeries
-from darts.utils.data.torch_datasets.training_dataset import SequentialTorchTrainingDataset
-from darts.utils.data.torch_datasets.inference_dataset import SequentialTorchInferenceDataset
+
 from lightning import LightningModule, Trainer
 from sklearn.metrics import average_precision_score, roc_auc_score
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 from torchmetrics import (
     AveragePrecision,
     ConfusionMatrix,
@@ -22,8 +22,13 @@ from torchmetrics import (
     Recall,
     ROC,
 )
-from src.data.utils import extract_windows
-from src.models.outlier import OutlierDetector
+from src.models.outlier import (
+    DetectionMetricSummary,
+    OutlierDetector,
+    ScoreSeriesMap,
+    ValidationMetrics,
+)
+from src.data.dataset import SlidingWindowDataset
 
 
 class OutlierModelWrapper(OutlierDetector):
@@ -46,6 +51,7 @@ class OutlierModelWrapper(OutlierDetector):
     def __init__(
         self,
         input_dim: int,
+        dev=False,
         model_dict: Optional[dict[str, LightningModule]] = None,
         window_size: int = 20,
         lr: float = 1e-3,
@@ -63,6 +69,7 @@ class OutlierModelWrapper(OutlierDetector):
         self.max_epochs = max_epochs
         self._accelerator = accelerator
         self.model_dict = model_dict
+        self.dev = dev
 
         self.val_metrics = MetricCollection(
             {
@@ -84,7 +91,7 @@ class OutlierModelWrapper(OutlierDetector):
 
     def pipeline(
         self, train: list[TimeSeries], test: list[TimeSeries], test_labels: Sequence[TimeSeries]
-    ) -> dict[str, dict[str, Any]]:
+    ) -> dict[str, DetectionMetricSummary]:
         return OutlierDetector.apply(self, train, test, test_labels)
 
     def fit(
@@ -102,24 +109,40 @@ class OutlierModelWrapper(OutlierDetector):
         """
 
         ws = self.window_size
+        if not train:
+            raise ValueError(
+                f"Nenhuma série de treino longa o suficiente para window_size={ws}. "
+                f"Reduza window_size ou forneça séries mais longas."
+            )
+        if not test:
+            raise ValueError(f"Nenhuma série de teste longa o suficiente para window_size={ws}.")
+
+        # --- Instanciação usando o novo Dataset Nativo ---
+        train_dataset = SlidingWindowDataset(train, window_size=ws)
+        test_dataset = SlidingWindowDataset(test, window_size=ws)
 
         # --- Train loader: janelas do treino (normais) ---
 
-        train_dataset = SequentialTorchTrainingDataset(test, input_chunk_length=ws, output_chunk_length=1)
-        print(f"TRAIN 0: {train_dataset[0]}")
-        test_dataset = SequentialTorchInferenceDataset(test, input_chunk_length=ws, output_chunk_length=1)
-
-        train_loader = DataLoader(
+        self.train_loader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
             shuffle=False,
         )
 
         # --- Val loader: janelas do teste (contêm anomalias reais) ---
-        val_loader = DataLoader(
+        self.val_loader = DataLoader(
             test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
+        )
+
+        self.trainer = Trainer(
+            fast_dev_run=self.dev,
+            max_epochs=self.max_epochs,
+            accelerator=self._accelerator,
+            enable_checkpointing=False,
+            logger=True,
+            enable_progress_bar=True,
         )
 
         assert self.model_dict is not None
@@ -129,24 +152,18 @@ class OutlierModelWrapper(OutlierDetector):
                 continue
 
             logging.info(f"Treinando modelo '{name}' …")
-            trainer = Trainer(
-                max_epochs=self.max_epochs,
-                accelerator=self._accelerator,
-                enable_checkpointing=False,
-                logger=True,
-                enable_progress_bar=True,
-            )
-            trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+
+            self.trainer.fit(model, train_dataloaders=self.train_loader, val_dataloaders=self.val_loader)
             gc.collect()
 
-    def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
+    def test_scorer(self, test: list[TimeSeries]) -> ScoreSeriesMap:
         """
         Para cada modelo em ``model_dict``, calcula o score de anomalia via
         erro de reconstrução (MSE) em janelas deslizantes centradas.
 
         Retorna um dicionário ``{nome_do_modelo: list[TimeSeries]}``.
         """
-        result: dict[str, list[TimeSeries]] = {}
+        result: ScoreSeriesMap = {}
 
         assert self.model_dict is not None
         for name, model in self.model_dict.items():
@@ -154,8 +171,14 @@ class OutlierModelWrapper(OutlierDetector):
                 logging.info(f"PL MODEL NULO — chave '{name}' — pulando")
                 continue
 
+            validation_metrics = cast(
+                ValidationMetrics,
+                self.trainer.validate(model, dataloaders=self.val_loader),
+            )
+            logging.debug("VALIDATION METRICS %s: %s", name, validation_metrics)
+
             ws = self.window_size
-            scores: list[TimeSeries] = []
+            model_scores: list[TimeSeries] = []
             model.eval()
 
             with torch.no_grad():
@@ -165,7 +188,7 @@ class OutlierModelWrapper(OutlierDetector):
                     score_vals = np.full(n, 0.0, dtype=float)
 
                     if n < ws:
-                        scores.append(TimeSeries.from_values(score_vals))
+                        model_scores.append(TimeSeries.from_values(score_vals))
                         continue
 
                     # Padding reflexivo nas bordas para janelas centradas
@@ -180,16 +203,16 @@ class OutlierModelWrapper(OutlierDetector):
                         mse = F.mse_loss(recon, x, reduction="none").mean().item()
                         score_vals[i] = mse
 
-                    scores.append(TimeSeries.from_values(score_vals))
+                    model_scores.append(TimeSeries.from_values(score_vals))
 
-            result[name] = scores
+            result[name] = model_scores
 
         return result
 
     def metrics(
-        self, test_labels: Sequence[TimeSeries], scores: dict[str, list[TimeSeries]]
-    ) -> dict[str, dict[str, Any]]:
-        result: dict[str, dict[str, Any]] = {}
+        self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap
+    ) -> dict[str, DetectionMetricSummary]:
+        result: dict[str, DetectionMetricSummary] = {}
 
         for name, model_scores in scores.items():
             y_true: list[int] = []
