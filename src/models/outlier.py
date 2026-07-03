@@ -1,11 +1,37 @@
 import logging
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Optional, TypeAlias, TypedDict
 
-from lightning import LightningModule
-import numpy as np
 from abc import ABC, abstractmethod
 from darts import TimeSeries
+from lightning import LightningModule
+from torch import Tensor
+
+
+class ValidationMetricLog(TypedDict, total=False):
+    val_auroc: float | Tensor
+    val_ap: float | Tensor
+
+
+class TestMetricLog(TypedDict, total=False):
+    auroc: float | Tensor
+    ap: float | Tensor
+    f1: float | Tensor
+    precision: float | Tensor
+    recall: float | Tensor
+    cm: Tensor
+
+
+class DetectionMetricSummary(TypedDict):
+    name: str
+    auc_roc: float
+    auc_pr: float
+
+
+ValidationMetrics: TypeAlias = list[ValidationMetricLog]
+TestMetrics: TypeAlias = list[TestMetricLog]
+ScoreSeriesMap: TypeAlias = dict[str, list[TimeSeries]]
+DetectionSummaryMap: TypeAlias = dict[str, DetectionMetricSummary]
 
 
 class OutlierDetector(ABC):
@@ -13,7 +39,7 @@ class OutlierDetector(ABC):
 
     def apply(
         self, train: list[TimeSeries], test: list[TimeSeries], test_labels: Sequence[TimeSeries]
-    ) -> dict[str, dict[str, Any]]:
+    ) -> DetectionSummaryMap:
         logging.info(f"MODELO: {self.__class__.__name__}")
         logging.info("TREINANDO ...")
         self.fit(train, test)
@@ -29,11 +55,9 @@ class OutlierDetector(ABC):
         pass
 
     @abstractmethod
-    def test_scorer(self, test: list[TimeSeries]) -> dict[str, list[TimeSeries]]:
+    def test_scorer(self, test: list[TimeSeries]) -> ScoreSeriesMap:
         pass
 
     @abstractmethod
-    def metrics(
-        self, test_labels: Sequence[TimeSeries], scores: dict[str, list[TimeSeries]]
-    ) -> dict[str, dict[str, Any]]:
+    def metrics(self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap) -> DetectionSummaryMap:
         pass
