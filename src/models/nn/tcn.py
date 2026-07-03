@@ -55,5 +55,12 @@ class TCN(LightningModule):
         self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         return loss
 
+    def validation_step(self, batch, batch_idx) -> torch.Tensor:
+        x, _ = batch
+        recon = self(x)
+        loss = F.mse_loss(recon, x)
+        self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        return loss
+
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
