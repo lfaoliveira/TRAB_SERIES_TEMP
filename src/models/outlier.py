@@ -10,7 +10,7 @@ from torch import Tensor
 
 class ValidationMetricLog(TypedDict, total=False):
     val_auroc: float | Tensor
-    val_ap: float | Tensor
+    val_f1: float | Tensor
 
 
 class TestMetricLog(TypedDict, total=False):
