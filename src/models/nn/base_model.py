@@ -4,7 +4,6 @@ from collections.abc import Sequence
 from typing import Optional, cast
 
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -55,7 +54,7 @@ class OutlierModelWrapper(OutlierDetector):
         model_dict: Optional[dict[str, LightningModule]] = None,
         window_size: int = 20,
         lr: float = 1e-3,
-        pos_weight: float = 1.0,
+        threshold: float = 0.99,
         batch_size: int = 32,
         max_epochs: int = 10,
         accelerator: str = "auto",
@@ -70,11 +69,12 @@ class OutlierModelWrapper(OutlierDetector):
         self._accelerator = accelerator
         self.model_dict = model_dict
         self.dev = dev
+        self.threshold = threshold
 
         self.val_metrics = MetricCollection(
             {
                 "val_auroc": ROC(task="binary"),
-                "val_ap": AveragePrecision(task="binary"),
+                "val_f1": FBetaScore(task="binary", beta=1.0),
             }
         )
 
@@ -118,20 +118,19 @@ class OutlierModelWrapper(OutlierDetector):
             raise ValueError(f"Nenhuma série de teste longa o suficiente para window_size={ws}.")
 
         # --- Instanciação usando o novo Dataset Nativo ---
-        train_dataset = SlidingWindowDataset(train, window_size=ws)
-        test_dataset = SlidingWindowDataset(test, window_size=ws)
+        self.train_dataset = SlidingWindowDataset(train, window_size=ws)
+        self.test_dataset = SlidingWindowDataset(test, window_size=ws)
 
         # --- Train loader: janelas do treino (normais) ---
-
         self.train_loader = DataLoader(
-            train_dataset,
+            self.train_dataset,
             batch_size=self.batch_size,
             shuffle=False,
         )
 
         # --- Val loader: janelas do teste (contêm anomalias reais) ---
         self.val_loader = DataLoader(
-            test_dataset,
+            self.test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
         )
@@ -159,7 +158,11 @@ class OutlierModelWrapper(OutlierDetector):
     def test_scorer(self, test: list[TimeSeries]) -> ScoreSeriesMap:
         """
         Para cada modelo em ``model_dict``, calcula o score de anomalia via
-        erro de reconstrução (MSE) em janelas deslizantes centradas.
+        erro de reconstrução (MSE) em janelas deslizantes.
+
+        Usa o ``test_dataset`` (SlidingWindowDataset) para inferência em lote
+        e depois converte o MSE por janela de volta para score por ponto
+        via ``windows_to_point_scores``.
 
         Retorna um dicionário ``{nome_do_modelo: list[TimeSeries]}``.
         """
@@ -177,33 +180,31 @@ class OutlierModelWrapper(OutlierDetector):
             )
             logging.debug("VALIDATION METRICS %s: %s", name, validation_metrics)
 
-            ws = self.window_size
-            model_scores: list[TimeSeries] = []
             model.eval()
+            all_mse: list[np.ndarray] = []
 
             with torch.no_grad():
-                for ts in test:
-                    vals = ts.values(copy=False).flatten()
-                    n = len(vals)
-                    score_vals = np.full(n, 0.0, dtype=float)
+                for batch in self.val_loader:
+                    x, _ = batch
+                    recon = model(x)
+                    mse = F.mse_loss(recon, x, reduction="none").mean(dim=1)
+                    all_mse.append(mse.cpu().numpy())
 
-                    if n < ws:
-                        model_scores.append(TimeSeries.from_values(score_vals))
-                        continue
+            if not all_mse:
+                result[name] = [TimeSeries.from_values(np.array([0.0])) for _ in test]
+                continue
 
-                    # Padding reflexivo nas bordas para janelas centradas
-                    half = ws // 2
-                    padded = np.pad(vals, (half, ws - half - 1), mode="edge")
+            mse_per_window = np.concatenate(all_mse)
+            point_scores = self.test_dataset.windows_to_point_scores(mse_per_window, threshold=self.threshold)
+            logging.debug(f"POINT: {point_scores}\n")
 
-                    for i in range(n):
-                        window = padded[i : i + ws]
-                        x = torch.tensor(window, dtype=torch.float32).unsqueeze(0)
-                        recon = model(x)  # (1, input_dim)
-                        # AVISO: ver se esse MSE faz sentido para todos os modelos!
-                        mse = F.mse_loss(recon, x, reduction="none").mean().item()
-                        score_vals[i] = mse
+            model_scores: list[TimeSeries] = []
 
-                    model_scores.append(TimeSeries.from_values(score_vals))
+            for scores_arr in point_scores:
+                if scores_arr is None:
+                    model_scores.append(TimeSeries.from_values(np.array([0.0])))
+                else:
+                    model_scores.append(TimeSeries.from_values(scores_arr))
 
             result[name] = model_scores
 
@@ -230,22 +231,3 @@ class OutlierModelWrapper(OutlierDetector):
             result[name] = {"name": name, "auc_roc": auc_roc, "auc_pr": auc_pr}
 
         return result
-
-    # ------------------------------------------------------------------
-    # LightningModule
-    # ------------------------------------------------------------------
-
-    # def forward(self, x: torch.Tensor) -> torch.Tensor:
-    #     return self.model(x)
-
-    # def training_step(
-    #     self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
-    # ) -> torch.Tensor:
-    #     data, labels = batch
-    #     logits = self.forward(data).flatten()
-    #     loss = F.binary_cross_entropy_with_logits(logits, labels, pos_weight=self.class_weight)
-    #     self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-    #     return loss
-
-    # def configure_optimizers(self) -> torch.optim.Optimizer:
-    #     return optim.AdamW(self.parameters(), lr=self.lr)
