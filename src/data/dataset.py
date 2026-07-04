@@ -368,11 +368,15 @@ class SlidingWindowDataset(Dataset):
     """
     Dataset PyTorch que transforma uma lista de séries temporais em
     janelas deslizantes de tamanho fixo de forma eficiente.
+
+    NOTE: USADO APENAS PARA TAREFAS DE RECONSTRUCAO.
     """
 
     def __init__(self, series_list: list, window_size: int):
         self.window_size = window_size
         self.windows = []
+        self._series_window_counts: list[int] = []
+        self._series_original_lengths: list[int] = []
 
         for ts in series_list:
             # Garante que estamos extraindo os valores brutos como array 1D
@@ -383,6 +387,8 @@ class SlidingWindowDataset(Dataset):
 
             # Filtra séries mais curtas que a janela desejada
             if len(arr) < window_size:
+                self._series_window_counts.append(0)
+                self._series_original_lengths.append(len(arr))
                 continue
 
             """ Cria janelas deslizantes sem duplicar os dados na memória (O(1) memory)
@@ -395,6 +401,9 @@ class SlidingWindowDataset(Dataset):
             ts_windows = np.lib.stride_tricks.as_strided(arr, shape=shape, strides=strides)
 
             self.windows.append(ts_windows)
+            # linhas = janelas
+            self._series_window_counts.append(len(ts_windows))
+            self._series_original_lengths.append(len(ts))
             """
             Ex:
             Linha 0 (Janela 1): [10, 20, 30]
@@ -417,4 +426,74 @@ class SlidingWindowDataset(Dataset):
         # Retorna a janela como tensor. Para modelos de reconstrução (Autoencoders, VAE, TCN),
         # a entrada e o alvo (X e Y) são a própria janela ou uma cópia dela.
         window = torch.tensor(self.windows[idx], dtype=torch.float32)
-        return window, window  # Retorna (X, Y) para o Lightning não reclamar
+        # Retorna (X, Y=X) para o Lightning não reclamar
+        return window, window
+
+    def windows_to_point_scores(
+        self, mse_per_window: np.ndarray, threshold: float | None = None
+    ) -> list[np.ndarray | None]:
+        """Converte erro de reconstrução por janela para score por ponto
+        em cada série original.
+
+        Cada ponto da série original participa de até ``window_size`` janelas.
+        Com ``threshold``, o MSE de cada janela vira 1 se passar do limiar
+        ``threshold * max(MSE)``, e 0 caso contrário. O ponto final também fica
+        binário: 1 se alguma janela que o contém for anômala, 0 se não.
+        Sem ``threshold``, retorna a média dos scores das janelas que contêm o
+        ponto.
+
+        Parâmetros
+        ----------
+        mse_per_window : np.ndarray
+            Array 1D com MSE de reconstrução de cada janela, na mesma ordem
+            do dataset (``self.windows``).
+        threshold : float | None
+            Fração do maior MSE usada como limiar. Se ``None``, não binariza.
+
+        Retorna
+        -------
+        list[np.ndarray | None]
+            Lista com um array por série original. ``None`` para séries que
+            eram curtas demais e não geraram janelas.
+        """
+        window_scores = np.asarray(mse_per_window).ravel()
+        if len(window_scores) != len(self.windows):
+            raise ValueError(
+                f"mse_per_window deve ter {len(self.windows)} valores, recebeu {len(window_scores)}"
+            )
+
+        binary_output = threshold is not None
+        if binary_output:
+            limiar = threshold * window_scores.max() if window_scores.max() > 0 else 0.0
+            window_scores = (window_scores > limiar).astype(int)
+
+        scores: list[np.ndarray | None] = []
+        idx = 0
+        ws = self.window_size
+        for n_windows, orig_len in zip(self._series_window_counts, self._series_original_lengths):
+            if n_windows == 0 or orig_len == 0:
+                scores.append(None)
+                continue
+
+            series_scores = window_scores[idx : idx + n_windows]
+            point_sum = np.zeros(orig_len)
+            point_count = np.zeros(orig_len, dtype=int)
+
+            for w_idx in range(n_windows):
+                start = w_idx
+                end = min(w_idx + ws, orig_len)
+                point_sum[start:end] += series_scores[w_idx]
+                point_count[start:end] += 1
+
+            point_avg = np.divide(
+                point_sum,
+                point_count,
+                out=np.zeros_like(point_sum),
+                where=point_count > 0,
+            )
+            # ponytail: ponto anomalo se qualquer janela que o cobre for anomala;
+            # upgrade: usar voto/proporcao minima se isso gerar falsos positivos.
+            scores.append((point_avg > 0).astype(int) if binary_output else point_avg)
+            idx += n_windows
+
+        return scores
