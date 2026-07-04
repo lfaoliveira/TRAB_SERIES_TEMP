@@ -15,7 +15,7 @@ class VAE(LightningModule):
     The model learns to reconstruct normal patterns; anomaly detection is done
     by thresholding the reconstruction error (MSE) at inference time.
     """
-    #AVISO: VAE PRECISA APENAS DOS DADOS NORMAIS PARA APRENDER
+    # AVISO: VAE PRECISA APENAS DOS DADOS NORMAIS PARA APRENDER
 
     def __init__(
         self,
@@ -69,6 +69,8 @@ class VAE(LightningModule):
 
     def kl_formula(self, logvar: torch.Tensor, mu: torch.Tensor):
         # $$\text{KL} = -0.5 \sum (1 + \log(\sigma^2) - \mu^2 - \sigma^2 )$$
+        # VAE tenta estimar log da variancia, que é usado diretamente no formula,
+        # Calculo normal da divergencia KL seria instavel aqui
         kl = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1).mean()
         return kl
 
@@ -80,9 +82,6 @@ class VAE(LightningModule):
         x_recon = self.decode(z)
 
         recon_loss = F.mse_loss(x_recon, x, reduction="sum")
-        # logging.info(f"RECON LOSS: {recon_loss}\n")
-        # logging.info(f"MU: {mu}\n")
-        # logging.info(f"LOGVAR: {logvar.mul(0.5).exp()}\n")
 
         # AVISO calculo direto da Divergencia KL PRA EVITAR INSTABILIDADE NUMERICA!
         kl = self.kl_formula(logvar, mu)
@@ -104,6 +103,8 @@ class VAE(LightningModule):
         loss = recon_loss + kl
 
         self.log("val_loss", loss, prog_bar=True)
+        self.log("val_recon_loss", recon_loss, prog_bar=False)
+        self.log("val_kl_loss", kl, prog_bar=False)
         return loss
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
