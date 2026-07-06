@@ -19,6 +19,7 @@ dependencies = [
     "plotly>=6.8.0",
     "pyarrow>=24.0.0",
     "pydantic>=2.13.4",
+    "pytorch-tcn>=1.2.3",
     "pyyaml>=6.0.3",
     "scikit-learn>=1.8.0",
     "seaborn>=0.13.2",
@@ -35,6 +36,7 @@ kaggle = [
     "lightning>=2.6.5",
     "logging>=0.4.9.6",
     "mlflow>=1.27.0",
+    "pytorch-tcn>=1.2.3",
 ]
 
 [tool.taskipy.tasks]
