@@ -108,7 +108,14 @@ class VAE(LightningModule):
         self.log("val_loss", loss, prog_bar=True)
         self.log("val_recon_loss", recon_loss, prog_bar=False)
         self.log("val_kl_loss", kl, prog_bar=False)
+
+        self.val_metrics.update(x_recon, x)
         return loss
+
+    def on_validation_epoch_end(self):
+        metrics = self.val_metrics.compute()
+        self.log_dict(metrics)
+        self.val_metrics.reset()
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
         return torch.optim.Adam(self.parameters(), lr=self.lr)

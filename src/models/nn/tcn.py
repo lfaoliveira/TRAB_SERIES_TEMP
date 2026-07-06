@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from lightning import LightningModule
 from pytorch_tcn import TCN
 
-from src.models.outlier import build_test_metrics, build_validation_metrics
+from src.models.outlier import build_validation_metrics, build_test_metrics
 
 
 class TCN_train(LightningModule):
@@ -65,8 +65,17 @@ class TCN_train(LightningModule):
         x, _ = batch
         recon = self(x)
         loss = F.mse_loss(recon, x)
+
+        # tenta reconstruir 'x'
         self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.val_metrics.update(recon, x)
+
         return loss
+
+    def on_validation_epoch_end(self):
+        metrics = self.val_metrics.compute()
+        self.log_dict(metrics)
+        self.val_metrics.reset()
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
