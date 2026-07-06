@@ -12,9 +12,6 @@ from src.data.utils import extract_windows
 from src.models.outlier import DetectionMetricSummary, OutlierDetector, ScoreSeriesMap
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # Modelos
 # ---------------------------------------------------------------------------
