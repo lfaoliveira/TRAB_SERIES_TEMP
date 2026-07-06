@@ -1,3 +1,4 @@
+import logging
 from typing import Literal
 
 import torch
@@ -16,7 +17,6 @@ class TCN_train(LightningModule):
 
     def __init__(
         self,
-        input_dim: int = 20,
         num_channels: list[int] = [],
         use_norm: Literal["weight_norm", "batch_norm"] = "weight_norm",
         lr: float = 1e-3,
@@ -29,7 +29,7 @@ class TCN_train(LightningModule):
             num_channels = [1, 64, 64, 128, 256, 512]
 
         self.model = TCN(
-            num_inputs=input_dim,
+            num_inputs=1,
             num_channels=num_channels,
             kernel_size=5,
             dilations=None,  # DILATACAO PADRAO exponencial
@@ -41,15 +41,15 @@ class TCN_train(LightningModule):
             use_skip_connections=True,
             input_shape="NCL",  # exige input (batch size, number of input channels, sequence length)
             embedding_shapes=None,  # SEM EMBEDDINGS, PRA SIMPLIFICAR
-            output_projection=None,  # PROJETA DE VOLTA PRA DIM DO INPUT
+            output_projection=1,  # PROJETA DE VOLTA PRA DIM DO INPUT
             output_activation=None,  # APENAS RECONSTRUCAO, SEM CLASSIFICACAO DIRETA
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (batch, input_dim)
-        x = x.unsqueeze(1)  # (batch, 1, input_dim)
-        recon = self.model(x)  # (batch, latent_dim)
-        return recon.squeeze(1)  # (batch, input_dim)
+        # x: (batch, window)
+        x = x.unsqueeze(1)  # (batch, window, 1)
+        recon = self.model(x)
+        return recon.squeeze(1)  # (batch, window)
 
     def training_step(self, batch, batch_idx) -> torch.Tensor:
         x, _ = batch
