@@ -119,6 +119,7 @@ class OutlierModelWrapper(OutlierDetector):
 
         # --- Instanciação usando o novo Dataset Nativo ---
         self.train_dataset = SlidingWindowDataset(train, window_size=ws)
+        logging.debug(f"SHAPE BATCH 0: {self.train_dataset[0][0].shape}")
         self.test_dataset = SlidingWindowDataset(test, window_size=ws)
 
         # --- Train loader: janelas do treino (normais) ---
