@@ -195,6 +195,7 @@ class OutlierModelWrapper(OutlierDetector):
                 continue
 
             mse_per_window = np.concatenate(all_mse)
+            # MSE de reconstrucao -> classificacao point-wise com base em threshold
             point_scores = self.test_dataset.windows_to_point_scores(mse_per_window, threshold=self.threshold)
             logging.debug(f"POINT: {point_scores}\n")
 
