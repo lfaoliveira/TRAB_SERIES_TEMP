@@ -15,13 +15,15 @@ class VAE(LightningModule):
     The model learns to reconstruct normal patterns; anomaly detection is done
     by thresholding the reconstruction error (MSE) at inference time.
     """
+
     # AVISO: VAE PRECISA APENAS DOS DADOS NORMAIS PARA APRENDER
+    # NOTE: usado para comparar com TCN mais simples
 
     def __init__(
         self,
         input_dim: int,
-        hidden_dim: int = 64,
-        latent_dim: int = 16,
+        hidden_dim: int = 512,
+        latent_dim: int = 256,
         lr: float = 1e-3,
     ):
         super().__init__()
@@ -30,24 +32,25 @@ class VAE(LightningModule):
         self.lr = lr
 
         # Encoder
+
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.LazyLinear(hidden_dim // 2),
             nn.ReLU(),
         )
 
         # Latent space projections
-        self.fc_mu = nn.Linear(hidden_dim // 2, latent_dim)
-        self.fc_logvar = nn.Linear(hidden_dim // 2, latent_dim)
+        self.fc_mu = nn.Sequential(nn.LazyLinear(latent_dim), nn.ReLU(), nn.LazyLinear(latent_dim // 2))
+        self.fc_logvar = nn.Sequential(nn.LazyLinear(latent_dim), nn.ReLU(), nn.LazyLinear(latent_dim // 2))
 
         # Decoder
         self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim // 2),
+            nn.LazyLinear(hidden_dim // 2),
             nn.ReLU(),
-            nn.Linear(hidden_dim // 2, hidden_dim),
+            nn.LazyLinear(hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, input_dim),
+            nn.LazyLinear(input_dim),
         )
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
