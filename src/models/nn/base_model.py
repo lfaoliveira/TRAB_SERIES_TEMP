@@ -5,27 +5,19 @@ from typing import Optional, cast
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from darts import TimeSeries
 
 from lightning import LightningModule, Trainer
 from sklearn.metrics import average_precision_score, roc_auc_score
 from torch.utils.data import DataLoader
-from torchmetrics import (
-    AveragePrecision,
-    ConfusionMatrix,
-    FBetaScore,
-    MetricCollection,
-    Precision,
-    Recall,
-    ROC,
-)
 from src.models.outlier import (
     DetectionMetricSummary,
     OutlierDetector,
     ScoreSeriesMap,
     ValidationMetrics,
+    build_test_metrics,
+    build_validation_metrics,
 )
 from src.data.dataset import SlidingWindowDataset
 
@@ -61,7 +53,6 @@ class OutlierModelWrapper(OutlierDetector):
     ) -> None:
         OutlierDetector.__init__(self)
 
-        self.model: nn.Module = nn.Identity()
         self.lr = lr
         self.window_size = window_size
         self.batch_size = batch_size
@@ -71,23 +62,8 @@ class OutlierModelWrapper(OutlierDetector):
         self.dev = dev
         self.threshold = threshold
 
-        self.val_metrics = MetricCollection(
-            {
-                "val_auroc": ROC(task="binary"),
-                "val_f1": FBetaScore(task="binary", beta=1.0),
-            }
-        )
-
-        self.test_metrics = MetricCollection(
-            {
-                "auroc": ROC(task="binary"),
-                "ap": AveragePrecision(task="binary"),
-                "f1": FBetaScore(task="binary", beta=1.0),
-                "precision": Precision(task="binary"),
-                "recall": Recall(task="binary"),
-                "cm": ConfusionMatrix(task="binary"),
-            }
-        )
+        self.val_metrics = build_validation_metrics()
+        self.test_metrics = build_test_metrics()
 
     def pipeline(
         self, train: list[TimeSeries], test: list[TimeSeries], test_labels: Sequence[TimeSeries]

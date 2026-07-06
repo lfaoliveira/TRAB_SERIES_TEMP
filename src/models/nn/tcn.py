@@ -1,11 +1,11 @@
-import logging
 from typing import Literal
 
 import torch
-from torch import nn
 import torch.nn.functional as F
 from lightning import LightningModule
 from pytorch_tcn import TCN
+
+from src.models.outlier import build_test_metrics, build_validation_metrics
 
 
 class TCN_train(LightningModule):
@@ -44,6 +44,9 @@ class TCN_train(LightningModule):
             output_projection=1,  # PROJETA DE VOLTA PRA DIM DO INPUT
             output_activation=None,  # APENAS RECONSTRUCAO, SEM CLASSIFICACAO DIRETA
         )
+
+        self.val_metrics = build_validation_metrics()
+        self.test_metrics = build_test_metrics()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (batch, window)

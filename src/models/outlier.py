@@ -6,6 +6,15 @@ from abc import ABC, abstractmethod
 from darts import TimeSeries
 from lightning import LightningModule
 from torch import Tensor
+from torchmetrics import (
+    AveragePrecision,
+    ConfusionMatrix,
+    FBetaScore,
+    MetricCollection,
+    Precision,
+    Recall,
+    AUROC,
+)
 
 
 class ValidationMetricLog(TypedDict, total=False):
@@ -32,6 +41,28 @@ ValidationMetrics: TypeAlias = list[ValidationMetricLog]
 TestMetrics: TypeAlias = list[TestMetricLog]
 ScoreSeriesMap: TypeAlias = dict[str, list[TimeSeries]]
 DetectionSummaryMap: TypeAlias = dict[str, DetectionMetricSummary]
+
+
+def build_validation_metrics() -> MetricCollection:
+    return MetricCollection(
+        {
+            "val_auroc": AUROC(task="binary"),
+            "val_f1": FBetaScore(task="binary", beta=1.0),
+        }
+    )
+
+
+def build_test_metrics() -> MetricCollection:
+    return MetricCollection(
+        {
+            "auroc": AUROC(task="binary"),
+            "ap": AveragePrecision(task="binary"),
+            "f1": FBetaScore(task="binary", beta=1.0),
+            "precision": Precision(task="binary"),
+            "recall": Recall(task="binary"),
+            "cm": ConfusionMatrix(task="binary"),
+        }
+    )
 
 
 class OutlierDetector(ABC):

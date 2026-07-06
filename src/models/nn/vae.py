@@ -1,11 +1,8 @@
-import logging
-
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torch.nn.modules.loss import KLDivLoss
-from torch.distributions import Normal, kl_divergence
 from lightning import LightningModule
+from src.models.outlier import build_test_metrics, build_validation_metrics
 
 
 class VAE(LightningModule):
@@ -52,6 +49,9 @@ class VAE(LightningModule):
             nn.ReLU(),
             nn.LazyLinear(input_dim),
         )
+
+        self.val_metrics = build_validation_metrics()
+        self.test_metrics = build_test_metrics()
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         h = self.encoder(x)

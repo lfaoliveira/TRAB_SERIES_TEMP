@@ -3336,6 +3336,7 @@ kaggle = [
     { name = "lightning" },
     { name = "logging" },
     { name = "mlflow" },
+    { name = "pytorch-tcn" },
     { name = "pyyaml" },
     { name = "statsmodels" },
 ]
@@ -3376,6 +3377,7 @@ kaggle = [
     { name = "lightning", specifier = ">=2.6.5" },
     { name = "logging", specifier = ">=0.4.9.6" },
     { name = "mlflow", specifier = ">=1.27.0" },
+    { name = "pytorch-tcn", specifier = ">=1.2.3" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "statsmodels", specifier = ">=0.14.6" },
 ]
