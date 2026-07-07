@@ -78,7 +78,7 @@ class VAE(LightningModule):
         return kl
 
     def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        x, _ = batch
+        x, y = batch
         # IGUAL FORWARD, mas reutiliza media de logvar pra loss!
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
@@ -96,7 +96,7 @@ class VAE(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, _ = batch
+        x, y = batch
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
         x_recon = self.decode(z)

@@ -55,14 +55,14 @@ class TCN_train(LightningModule):
         return recon.squeeze(1)  # (batch, window)
 
     def training_step(self, batch, batch_idx) -> torch.Tensor:
-        x, _ = batch
+        x, y = batch
         recon = self(x)
         loss = F.mse_loss(recon, x)
         self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx) -> torch.Tensor:
-        x, _ = batch
+        x, y = batch
         recon = self(x)
         loss = F.mse_loss(recon, x)
 

@@ -61,14 +61,20 @@ class OutlierModelWrapper(OutlierDetector):
         self.threshold = threshold
 
     def pipeline(
-        self, train: list[TimeSeries], test: list[TimeSeries], test_labels: Sequence[TimeSeries]
+        self,
+        train: list[TimeSeries],
+        train_labels: list[TimeSeries],
+        test: list[TimeSeries],
+        test_labels: list[TimeSeries],
     ) -> dict[str, DetectionMetricSummary]:
-        return OutlierDetector.apply(self, train, test, test_labels)
+        return OutlierDetector.apply(self, train, train_labels, test, test_labels)
 
     def fit(
         self,
         train: list[TimeSeries],
+        train_labels: list[TimeSeries],
         test: list[TimeSeries],
+        test_labels: list[TimeSeries],
     ) -> None:
         """
         Converte as séries de treino em janelas deslizantes (rótulo 0 —
@@ -89,9 +95,9 @@ class OutlierModelWrapper(OutlierDetector):
             raise ValueError(f"Nenhuma série de teste longa o suficiente para window_size={ws}.")
 
         # --- Instanciação usando o novo Dataset Nativo ---
-        self.train_dataset = SlidingWindowDataset(train, window_size=ws)
+        self.train_dataset = SlidingWindowDataset(train, labels_list=train_labels, window_size=ws)
         logging.debug(f"SHAPE BATCH 0: {self.train_dataset[0][0].shape}")
-        self.test_dataset = SlidingWindowDataset(test, window_size=ws)
+        self.test_dataset = SlidingWindowDataset(test, labels_list=test_labels, window_size=ws)
 
         # --- Train loader: janelas do treino (normais) ---
         self.train_loader = DataLoader(
