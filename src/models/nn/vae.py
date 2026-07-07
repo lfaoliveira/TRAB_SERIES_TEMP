@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from lightning import LightningModule
-from src.models.outlier import build_test_metrics, build_validation_metrics
+from src.pipelines.metrics import build_test_metrics, build_validation_metrics
 
 
 class VAE(LightningModule):
@@ -79,7 +79,7 @@ class VAE(LightningModule):
 
     def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
         x, _ = batch
-        # IGUAL FORWARD!
+        # IGUAL FORWARD, mas reutiliza media de logvar pra loss!
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
         x_recon = self.decode(z)

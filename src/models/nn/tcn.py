@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from lightning import LightningModule
 from pytorch_tcn import TCN
 
-from src.models.outlier import build_validation_metrics, build_test_metrics
+from src.pipelines.metrics import build_test_metrics, build_validation_metrics
 
 
 class TCN_train(LightningModule):

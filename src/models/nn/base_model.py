@@ -9,15 +9,13 @@ import torch.nn.functional as F
 from darts import TimeSeries
 
 from lightning import LightningModule, Trainer
-from sklearn.metrics import average_precision_score, roc_auc_score
 from torch.utils.data import DataLoader
-from src.models.outlier import (
+from src.models.outlier import OutlierDetector
+from src.pipelines.metrics import (
     DetectionMetricSummary,
-    OutlierDetector,
     ScoreSeriesMap,
     ValidationMetrics,
-    build_test_metrics,
-    build_validation_metrics,
+    calculate_detection_summary,
 )
 from src.data.dataset import SlidingWindowDataset
 
@@ -61,9 +59,6 @@ class OutlierModelWrapper(OutlierDetector):
         self.model_dict = model_dict
         self.dev = dev
         self.threshold = threshold
-
-        self.val_metrics = build_validation_metrics()
-        self.test_metrics = build_test_metrics()
 
     def pipeline(
         self, train: list[TimeSeries], test: list[TimeSeries], test_labels: Sequence[TimeSeries]
@@ -191,21 +186,11 @@ class OutlierModelWrapper(OutlierDetector):
     def metrics(
         self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap
     ) -> dict[str, DetectionMetricSummary]:
-        result: dict[str, DetectionMetricSummary] = {}
+        if self._accelerator != "auto":
+            device = torch.device(self._accelerator)
+        elif self._accelerator == "cuda":
+            device = "cuda" if torch.cuda.is_available() else ""
+        else:
+            device = "cpu"
 
-        for name, model_scores in scores.items():
-            y_true: list[int] = []
-            y_score: list[float] = []
-
-            for label_ts, score_ts in zip(test_labels, model_scores):
-                labels = label_ts.values(copy=False).flatten()
-                score_vals = np.nan_to_num(score_ts.values(copy=False).flatten(), nan=0.0)
-                y_true.extend(labels.astype(int).tolist())
-                y_score.extend(score_vals.tolist())
-
-            auc_roc = float(roc_auc_score(y_true, y_score))
-            auc_pr = float(average_precision_score(y_true, y_score))
-
-            result[name] = {"name": name, "auc_roc": auc_roc, "auc_pr": auc_pr}
-
-        return result
+        return calculate_detection_summary(test_labels, scores, device)
