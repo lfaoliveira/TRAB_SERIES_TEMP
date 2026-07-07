@@ -6,7 +6,6 @@ from torch import Tensor
 import torch
 from torchmetrics import (
     AUROC,
-    AveragePrecision,
     ConfusionMatrix,
     FBetaScore,
     MetricCollection,
@@ -21,8 +20,6 @@ class ValidationMetricLog(TypedDict, total=False):
 
 
 class TestMetricLog(TypedDict, total=False):
-    auroc: float | Tensor
-    ap: float | Tensor
     f1: float | Tensor
     precision: float | Tensor
     recall: float | Tensor
@@ -51,8 +48,6 @@ def build_validation_metrics() -> MetricCollection:
 def build_test_metrics() -> MetricCollection:
     return MetricCollection(
         {
-            "auroc": AUROC(task="binary"),
-            "ap": AveragePrecision(task="binary"),
             "f1": FBetaScore(task="binary", beta=1.0),
             "precision": Precision(task="binary"),
             "recall": Recall(task="binary"),
