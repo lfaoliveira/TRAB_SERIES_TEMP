@@ -1,68 +1,15 @@
 import logging
 from collections.abc import Sequence
-from typing import Optional, TypeAlias, TypedDict
+from typing import Optional
 
 from abc import ABC, abstractmethod
 from darts import TimeSeries
 from lightning import LightningModule
-from torch import Tensor
-from torchmetrics import (
-    AveragePrecision,
-    ConfusionMatrix,
-    FBetaScore,
-    MetricCollection,
-    Precision,
-    Recall,
-    AUROC,
+
+from src.pipelines.metrics import (
+    DetectionSummaryMap,
+    ScoreSeriesMap,
 )
-
-
-class ValidationMetricLog(TypedDict, total=False):
-    val_auroc: float | Tensor
-    val_f1: float | Tensor
-
-
-class TestMetricLog(TypedDict, total=False):
-    auroc: float | Tensor
-    ap: float | Tensor
-    f1: float | Tensor
-    precision: float | Tensor
-    recall: float | Tensor
-    cm: Tensor
-
-
-class DetectionMetricSummary(TypedDict):
-    name: str
-    auc_roc: float
-    auc_pr: float
-
-
-ValidationMetrics: TypeAlias = list[ValidationMetricLog]
-TestMetrics: TypeAlias = list[TestMetricLog]
-ScoreSeriesMap: TypeAlias = dict[str, list[TimeSeries]]
-DetectionSummaryMap: TypeAlias = dict[str, DetectionMetricSummary]
-
-
-def build_validation_metrics() -> MetricCollection:
-    return MetricCollection(
-        {
-            "val_auroc": AUROC(task="binary"),
-            "val_f1": FBetaScore(task="binary", beta=1.0),
-        }
-    )
-
-
-def build_test_metrics() -> MetricCollection:
-    return MetricCollection(
-        {
-            "auroc": AUROC(task="binary"),
-            "ap": AveragePrecision(task="binary"),
-            "f1": FBetaScore(task="binary", beta=1.0),
-            "precision": Precision(task="binary"),
-            "recall": Recall(task="binary"),
-            "cm": ConfusionMatrix(task="binary"),
-        }
-    )
 
 
 class OutlierDetector(ABC):
