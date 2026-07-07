@@ -16,11 +16,15 @@ class OutlierDetector(ABC):
     model_dict: Optional[dict[str, LightningModule]] = None
 
     def apply(
-        self, train: list[TimeSeries], test: list[TimeSeries], test_labels: Sequence[TimeSeries]
+        self,
+        train: list[TimeSeries],
+        train_labels: list[TimeSeries],
+        test: list[TimeSeries],
+        test_labels: list[TimeSeries],
     ) -> DetectionSummaryMap:
         logging.info(f"MODELO: {self.__class__.__name__}")
         logging.info("TREINANDO ...")
-        self.fit(train, test)
+        self.fit(train, train_labels, test, test_labels)
         logging.info("TESTANDO ...")
         scores = self.test_scorer(test)
         logging.info("METRIFICANDO ...")
@@ -29,7 +33,13 @@ class OutlierDetector(ABC):
         return metrics
 
     @abstractmethod
-    def fit(self, train: list[TimeSeries], test: list[TimeSeries]):
+    def fit(
+        self,
+        train: list[TimeSeries],
+        train_labels: list[TimeSeries],
+        test: list[TimeSeries],
+        test_labels: list[TimeSeries],
+    ):
         pass
 
     @abstractmethod
