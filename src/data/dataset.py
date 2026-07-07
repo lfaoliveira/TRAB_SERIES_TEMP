@@ -372,18 +372,31 @@ class SlidingWindowDataset(Dataset):
     NOTE: USADO APENAS PARA TAREFAS DE RECONSTRUCAO.
     """
 
-    def __init__(self, series_list: list, window_size: int):
+    def __init__(self, series_list: list, window_size: int, labels_list: list | None = None):
         self.window_size = window_size
         self.windows = []
+        self.targets = []
         self._series_window_counts: list[int] = []
         self._series_original_lengths: list[int] = []
 
-        for ts in series_list:
+        if labels_list is not None and len(labels_list) != len(series_list):
+            raise ValueError("labels_list must have the same length as series_list")
+
+        for i, ts in enumerate(series_list):
             # Garante que estamos extraindo os valores brutos como array 1D
             if hasattr(ts, "values"):
                 arr = ts.values(copy=False).flatten()
             else:
                 arr = np.asarray(ts).flatten()
+
+            if labels_list is None:
+                raise ValueError("SEM LABELS!")
+            else:
+                label_ts = labels_list[i]
+                if hasattr(label_ts, "values"):
+                    labels = label_ts.values(copy=False).flatten().astype(np.int64)
+                else:
+                    labels = np.asarray(label_ts).flatten().astype(np.int64)
 
             # Filtra séries mais curtas que a janela desejada
             if len(arr) < window_size:
@@ -394,13 +407,16 @@ class SlidingWindowDataset(Dataset):
             """ Cria janelas deslizantes sem duplicar os dados na memória (O(1) memory)
              Para um array de tamanho N, gera (N - window_size + 1) janelas. 
              O número de janelas possíveis é sempre (N - window_size + 1) """
-            shape = (arr.size - window_size + 1, window_size)
+            shape_v = (arr.size - window_size + 1, window_size)
+            shape_tg = (labels.size - window_size + 1, window_size)
             # quantidade de bytes para pular para a próxima linha / coluna
             strides = (arr.strides[0], arr.strides[0])
             # cria matriz linearizada em memória (para cada série temporal)
-            ts_windows = np.lib.stride_tricks.as_strided(arr, shape=shape, strides=strides)
+            ts_windows = np.lib.stride_tricks.as_strided(arr, shape=shape_v, strides=strides)
+            target_windows = np.lib.stride_tricks.as_strided(labels, shape=shape_tg, strides=strides)
 
             self.windows.append(ts_windows)
+            self.targets.append(target_windows[:, -1])
             # linhas = janelas
             self._series_window_counts.append(len(ts_windows))
             self._series_original_lengths.append(len(ts))
@@ -416,18 +432,17 @@ class SlidingWindowDataset(Dataset):
             """ O np.concatenate(..., axis=0) pega todas essas matrizes e as 
             "empilha" verticalmente (uma embaixo da outra). """
             self.windows = np.concatenate(self.windows, axis=0)
+            self.targets = np.concatenate(self.targets, axis=0)
         else:
-            self.windows = np.empty((0, window_size), dtype=np.float32)
+            raise ValueError("SEM JANELAS!")
 
     def __len__(self):
         return len(self.windows)
 
     def __getitem__(self, idx):
-        # Retorna a janela como tensor. Para modelos de reconstrução (Autoencoders, VAE, TCN),
-        # a entrada e o alvo (X e Y) são a própria janela ou uma cópia dela.
-        window = torch.tensor(self.windows[idx], dtype=torch.float32)
-        # Retorna (X, Y=X) para o Lightning não reclamar
-        return window, window
+        x = torch.tensor(self.windows[idx], dtype=torch.float32)
+        y = torch.tensor(self.targets[idx], dtype=torch.long)
+        return x, y
 
     def windows_to_point_scores(
         self, mse_per_window: np.ndarray, threshold: float | None = None
