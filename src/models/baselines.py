@@ -1,15 +1,19 @@
-import logging
 from collections.abc import Sequence
 
 import numpy as np
+import torch
 from darts import TimeSeries
 from darts.ad.scorers import KMeansScorer
 import sklearn.ensemble
 import sklearn.neighbors
-from sklearn.metrics import average_precision_score, roc_auc_score
 
 from src.data.utils import extract_windows
-from src.models.outlier import DetectionMetricSummary, OutlierDetector, ScoreSeriesMap
+from src.models.outlier import OutlierDetector
+from src.pipelines.metrics import (
+    DetectionSummaryMap,
+    ScoreSeriesMap,
+    calculate_detection_summary,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +42,13 @@ class KMeans(OutlierDetector):
         )
         self.threshold = threshold
 
-    def fit(self, train: list[TimeSeries], test: list[TimeSeries]) -> None:
+    def fit(
+        self,
+        train: list[TimeSeries],
+        train_labels: list[TimeSeries],
+        test: list[TimeSeries],
+        test_labels: list[TimeSeries],
+    ) -> None:
         self.scorer.fit(train)
 
     def test_scorer(self, test: list[TimeSeries]) -> ScoreSeriesMap:
@@ -48,32 +58,16 @@ class KMeans(OutlierDetector):
         scores: list[TimeSeries] = [self.scorer.score(ts) for ts in test]  # type: ignore
         return {self.__class__.__name__: scores}
 
-    def metrics(
-        self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap
-    ) -> dict[str, DetectionMetricSummary]:
-        result: dict[str, DetectionMetricSummary] = {}
-        for name, model_scores in scores.items():
-            y_true = []
-            y_score = []
-            for label_ts, score in zip(test_labels, model_scores):
-                labels = label_ts.values(copy=False).flatten().astype(int)
-                score_vals = score.values(copy=False).flatten()
-                # O score tem window-1 valores a menos que os labels no início
-                n_warmup = len(labels) - len(score_vals)
-                labels_aligned = labels[n_warmup:]
-                assert len(labels_aligned) == len(score_vals), (
-                    f"labels {len(labels_aligned)} != scores {len(score_vals)} (warmup={n_warmup})"
-                )
-                y_true.extend(labels_aligned.tolist())
-                y_score.extend(score_vals.tolist())
-
-            auc_roc = roc_auc_score(y_true, y_score)
-            auc_pr = average_precision_score(y_true, y_score)
-
-            logging.info(f"[{name}] AUC-ROC: {auc_roc:.4f} | AUC-PR: {auc_pr:.4f}")
-            result[name] = {"name": name, "auc_roc": auc_roc, "auc_pr": auc_pr}
-
-        return result
+    def metrics(self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap) -> DetectionSummaryMap:
+        # KMeansScorer produz scores mais curtos que os labels (warmup) —
+        # alinhamos os labels antes de delegar para a função central
+        aligned: list[TimeSeries] = []
+        for label_ts, score_ts in zip(test_labels, scores[self.__class__.__name__]):
+            labels = label_ts.values(copy=False).flatten()
+            score_vals = score_ts.values(copy=False).flatten()
+            n_warmup = len(labels) - len(score_vals)
+            aligned.append(TimeSeries.from_values(labels[n_warmup:]))
+        return calculate_detection_summary(aligned, scores, torch.device("cpu"))
 
 
 class Hampel(OutlierDetector):
@@ -88,7 +82,13 @@ class Hampel(OutlierDetector):
         self.window_size = window_size
         self.n_sigmas = n_sigmas
 
-    def fit(self, train: list[TimeSeries], test: list[TimeSeries]):
+    def fit(
+        self,
+        train: list[TimeSeries],
+        train_labels: list[TimeSeries],
+        test: list[TimeSeries],
+        test_labels: list[TimeSeries],
+    ):
         # Filtro de Hampel é não-supervisionado e sem estado — nada a treinar
         pass
 
@@ -115,27 +115,8 @@ class Hampel(OutlierDetector):
 
         return {self.__class__.__name__: scores}
 
-    def metrics(
-        self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap
-    ) -> dict[str, DetectionMetricSummary]:
-        result: dict[str, DetectionMetricSummary] = {}
-        for name, model_scores in scores.items():
-            y_true = []
-            y_score = []
-            for label_ts, score in zip(test_labels, model_scores):
-                labels = label_ts.values(copy=False).flatten().astype(int)
-                score_vals = score.values(copy=False).flatten()
-                # Hampel produz score para todo ponto (mesmo comprimento dos labels)
-                y_true.extend(labels.tolist())
-                y_score.extend(score_vals.tolist())
-
-            auc_roc = roc_auc_score(y_true, y_score)
-            auc_pr = average_precision_score(y_true, y_score)
-
-            logging.info(f"[{name}] AUC-ROC: {auc_roc:.4f} | AUC-PR: {auc_pr:.4f}")
-            result[name] = {"name": name, "auc_roc": auc_roc, "auc_pr": auc_pr}
-
-        return result
+    def metrics(self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap) -> DetectionSummaryMap:
+        return calculate_detection_summary(test_labels, scores, torch.device("cpu"))
 
 
 class LocalOutlierFactor(OutlierDetector):
@@ -162,7 +143,13 @@ class LocalOutlierFactor(OutlierDetector):
         self.model: sklearn.neighbors.LocalOutlierFactor | None = None
         self._n_features: int = 0
 
-    def fit(self, train: list[TimeSeries], test: list[TimeSeries]):
+    def fit(
+        self,
+        train: list[TimeSeries],
+        train_labels: list[TimeSeries],
+        test: list[TimeSeries],
+        test_labels: list[TimeSeries],
+    ):
         ws = self.window_size
         X_train: list[np.ndarray] = []
         for ts in train:
@@ -177,7 +164,6 @@ class LocalOutlierFactor(OutlierDetector):
         X = np.concatenate(X_train, axis=0)
         self._n_features = X.shape[1]
 
-        # novelty=True permite fit + predict separados (como IsolationForest)
         self.model = sklearn.neighbors.LocalOutlierFactor(
             n_neighbors=self.n_neighbors,
             contamination=self.contamination,
@@ -203,26 +189,8 @@ class LocalOutlierFactor(OutlierDetector):
 
         return {self.__class__.__name__: scores}
 
-    def metrics(
-        self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap
-    ) -> dict[str, DetectionMetricSummary]:
-        result: dict[str, DetectionMetricSummary] = {}
-        for name, model_scores in scores.items():
-            y_true = []
-            y_score = []
-            for label_ts, score in zip(test_labels, model_scores):
-                labels = label_ts.values(copy=False).flatten().astype(int)
-                score_vals = score.values(copy=False).flatten()
-                y_true.extend(labels.tolist())
-                y_score.extend(score_vals.tolist())
-
-            auc_roc = roc_auc_score(y_true, y_score)
-            auc_pr = average_precision_score(y_true, y_score)
-
-            logging.info(f"[{name}] AUC-ROC: {auc_roc:.4f} | AUC-PR: {auc_pr:.4f}")
-            result[name] = {"name": name, "auc_roc": auc_roc, "auc_pr": auc_pr}
-
-        return result
+    def metrics(self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap) -> DetectionSummaryMap:
+        return calculate_detection_summary(test_labels, scores, torch.device("cpu"))
 
 
 class IsolationForest(OutlierDetector):
@@ -250,7 +218,13 @@ class IsolationForest(OutlierDetector):
         self.model: sklearn.ensemble.IsolationForest | None = None
         self._n_features: int = 0
 
-    def fit(self, train: list[TimeSeries], test: list[TimeSeries]):
+    def fit(
+        self,
+        train: list[TimeSeries],
+        train_labels: list[TimeSeries],
+        test: list[TimeSeries],
+        test_labels: list[TimeSeries],
+    ):
         ws = self.window_size
         X_train: list[np.ndarray] = []
         for ts in train:
@@ -288,23 +262,5 @@ class IsolationForest(OutlierDetector):
 
         return {self.__class__.__name__: scores}
 
-    def metrics(
-        self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap
-    ) -> dict[str, DetectionMetricSummary]:
-        result: dict[str, DetectionMetricSummary] = {}
-        for name, model_scores in scores.items():
-            y_true = []
-            y_score = []
-            for label_ts, score in zip(test_labels, model_scores):
-                labels = label_ts.values(copy=False).flatten().astype(int)
-                score_vals = score.values(copy=False).flatten()
-                y_true.extend(labels.tolist())
-                y_score.extend(score_vals.tolist())
-
-            auc_roc = roc_auc_score(y_true, y_score)
-            auc_pr = average_precision_score(y_true, y_score)
-
-            logging.info(f"AUC-ROC: {auc_roc:.4f}")
-            logging.info(f"AUC-PR : {auc_pr:.4f}")
-            result[name] = {"name": name, "auc_roc": auc_roc, "auc_pr": auc_pr}
-        return result
+    def metrics(self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap) -> DetectionSummaryMap:
+        return calculate_detection_summary(test_labels, scores, torch.device("cpu"))
