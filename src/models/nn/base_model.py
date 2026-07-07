@@ -47,7 +47,7 @@ class OutlierModelWrapper(OutlierDetector):
         threshold: float = 0.99,
         batch_size: int = 32,
         max_epochs: int = 10,
-        accelerator: str = "auto",
+        accelerator: str = "cuda",
     ) -> None:
         OutlierDetector.__init__(self)
 
@@ -172,9 +172,9 @@ class OutlierModelWrapper(OutlierDetector):
                 result[name] = [TimeSeries.from_values(np.array([0.0])) for _ in test]
                 continue
 
-            mse_per_window = np.concatenate(all_mse)
+            point_mse = np.concatenate(all_mse)
             # MSE de reconstrucao -> classificacao point-wise com base em threshold
-            point_scores = self.test_dataset.windows_to_point_scores(mse_per_window, threshold=self.threshold)
+            point_scores = self.test_dataset.windows_to_point_scores(point_mse, threshold=self.threshold)
             logging.debug(f"POINT: {point_scores}\n")
 
             model_scores: list[TimeSeries] = []
@@ -195,8 +195,8 @@ class OutlierModelWrapper(OutlierDetector):
         if self._accelerator != "auto":
             device = torch.device(self._accelerator)
         elif self._accelerator == "cuda":
-            device = "cuda" if torch.cuda.is_available() else ""
+            device = torch.device("cuda") if torch.cuda.is_available() else torch.device("")
         else:
-            device = "cpu"
+            device = torch.device("cpu")
 
         return calculate_detection_summary(test_labels, scores, device)
