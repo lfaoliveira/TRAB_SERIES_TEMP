@@ -177,13 +177,9 @@ class OutlierModelWrapper(OutlierDetector):
             point_scores = self.test_dataset.windows_to_point_scores(point_mse, threshold=self.threshold)
             logging.debug(f"POINT: {point_scores}\n")
 
-            model_scores: list[TimeSeries] = []
-
-            for scores_arr in point_scores:
-                if scores_arr is None:
-                    model_scores.append(TimeSeries.from_values(np.array([0.0])))
-                else:
-                    model_scores.append(TimeSeries.from_values(scores_arr))
+            model_scores: list[TimeSeries] = [
+                TimeSeries.from_values(scores_arr) for scores_arr in point_scores if (scores_arr is not None)
+            ]
 
             result[name] = model_scores
 
