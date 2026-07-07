@@ -61,6 +61,16 @@ def build_test_metrics() -> MetricCollection:
     )
 
 
+def anomaly_detect_mse(mse_tensor: torch.Tensor, threshold: float) -> torch.Tensor:
+    # mse_tensor: (batch, window)
+    max = mse_tensor.max(dim=0).values
+    limiar = threshold * max
+    mask = mse_tensor > limiar
+    anomaly: torch.Tensor = mse_tensor[mask]
+
+    return anomaly
+
+
 def calculate_detection_summary(
     test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap, device: torch.device
 ) -> DetectionSummaryMap:
