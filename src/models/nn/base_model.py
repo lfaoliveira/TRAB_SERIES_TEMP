@@ -132,6 +132,7 @@ class OutlierModelWrapper(OutlierDetector):
 
             self.trainer.fit(model, train_dataloaders=self.train_loader, val_dataloaders=self.val_loader)
             gc.collect()
+            torch.cuda.empty_cache()
 
     def test_scorer(self, test: list[TimeSeries]) -> ScoreSeriesMap:
         """
