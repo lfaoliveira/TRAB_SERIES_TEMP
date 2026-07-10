@@ -4,8 +4,9 @@ from typing import TypeAlias, TypedDict
 from darts import TimeSeries
 from torch import Tensor
 import torch
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from torchmetrics import (
-    AUROC,
     ConfusionMatrix,
     FBetaScore,
     MetricCollection,
@@ -41,6 +42,66 @@ ValidationMetrics: TypeAlias = list[ValidationMetricLog]
 TestMetrics: TypeAlias = list[TestMetricLog]
 ScoreSeriesMap: TypeAlias = dict[str, list[TimeSeries]]
 DetectionSummaryMap: TypeAlias = dict[str, DetectionMetricSummary]
+
+
+class CentralMetricsStore:
+    _data: dict[str, dict[str, list[dict[str, float]]]] = {}
+
+    @classmethod
+    def clear(cls) -> None:
+        cls._data = {}
+
+    @classmethod
+    def add(cls, model_name: str, split: str, metrics: dict[str, Tensor | float]) -> None:
+        split_store = cls._data.setdefault(model_name, {}).setdefault(split, [])
+        split_store.append(
+            {
+                name: float(value.detach().cpu()) if isinstance(value, Tensor) else float(value)
+                for name, value in metrics.items()
+            }
+        )
+
+    @classmethod
+    def as_dict(cls) -> dict[str, dict[str, list[dict[str, float]]]]:
+        return cls._data
+
+    @classmethod
+    def plot_metric(cls, metric_name: str, split: str = "validation") -> go.Figure:
+        fig = go.Figure()
+
+        for model_name, model_splits in cls._data.items():
+            epoch_metrics = model_splits.get(split, [])
+            epochs = list(range(1, len(epoch_metrics) + 1))
+            values = [
+                epoch_metric.get(metric_name) for epoch_metric in epoch_metrics if metric_name in epoch_metric
+            ]
+            if not values:
+                continue
+            fig.add_trace(
+                go.Scatter(x=epochs[: len(values)], y=values, mode="lines+markers", name=model_name)
+            )
+
+        fig.update_layout(
+            title=f"{metric_name} por modelo ({split})",
+            xaxis_title="Epoch",
+            yaxis_title=metric_name,
+            template="plotly_white",
+        )
+        return fig
+
+    @classmethod
+    def plot_all_metrics(cls, split: str = "validation") -> dict[str, go.Figure]:
+        metric_names: set[str] = set()
+        for model_splits in cls._data.values():
+            for metric_block in model_splits.get(split, []):
+                metric_names.update(metric_block.keys())
+
+        return {
+            metric_name: cls.plot_metric(metric_name, split=split) for metric_name in sorted(metric_names)
+        }
+
+
+CentralMetricsPlotter = CentralMetricsStore
 
 
 def build_validation_metrics() -> MetricCollection:
@@ -98,7 +159,14 @@ def calculate_detection_summary(
 
 
 if __name__ == "__main__":
+    CentralMetricsStore.clear()
+    CentralMetricsStore.add("TCN", "validation", {"val_mse": 1.0, "val_smape": 2.0, "val_mae": 3.0})
+    CentralMetricsStore.add("VAE", "validation", {"val_mse": 2.0, "val_smape": 3.0, "val_mae": 4.0})
+    CentralMetricsStore.add("TCN", "test", {"val_mse": 1.5, "val_smape": 2.5, "val_mae": 3.5})
+    CentralMetricsStore.add("VAE", "test", {"val_mse": 2.5, "val_smape": 3.5, "val_mae": 4.5})
     validation_metrics = build_validation_metrics()
     test_metrics = build_test_metrics()
     assert set(validation_metrics.keys()) == {"val_mse", "val_smape", "val_mae"}
-    assert {"val_mse", "val_smape", "val_mae", "f1", "precision", "recall", "cm"} in set(test_metrics.keys())
+    assert {"val_mse", "val_smape", "val_mae", "f1", "precision", "recall", "cm"} <= set(test_metrics.keys())
+    figures = CentralMetricsStore.plot_all_metrics()
+    assert set(figures.keys()) == {"val_mae", "val_mse", "val_smape"}
