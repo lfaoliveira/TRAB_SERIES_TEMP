@@ -9,17 +9,24 @@ from torchmetrics import (
     ConfusionMatrix,
     FBetaScore,
     MetricCollection,
+    MeanAbsoluteError,
+    MeanSquaredError,
     Precision,
     Recall,
+    SymmetricMeanAbsolutePercentageError,
 )
 
 
 class ValidationMetricLog(TypedDict, total=False):
-    val_auroc: float | Tensor
-    val_f1: float | Tensor
+    val_mse: float | Tensor
+    val_smape: float | Tensor
+    val_mae: float | Tensor
 
 
 class TestMetricLog(TypedDict, total=False):
+    val_mse: float | Tensor
+    val_smape: float | Tensor
+    val_mae: float | Tensor
     f1: float | Tensor
     precision: float | Tensor
     recall: float | Tensor
@@ -39,8 +46,9 @@ DetectionSummaryMap: TypeAlias = dict[str, DetectionMetricSummary]
 def build_validation_metrics() -> MetricCollection:
     return MetricCollection(
         {
-            "val_auroc": AUROC(task="binary"),
-            "val_f1": FBetaScore(task="binary", beta=1.0),
+            "val_mse": MeanSquaredError(),
+            "val_smape": SymmetricMeanAbsolutePercentageError(),
+            "val_mae": MeanAbsoluteError(),
         }
     )
 
@@ -87,3 +95,10 @@ def calculate_detection_summary(
         result[name]["name"] = name
 
     return result
+
+
+if __name__ == "__main__":
+    validation_metrics = build_validation_metrics()
+    test_metrics = build_test_metrics()
+    assert set(validation_metrics.keys()) == {"val_mse", "val_smape", "val_mae"}
+    assert {"val_mse", "val_smape", "val_mae", "f1", "precision", "recall", "cm"} in set(test_metrics.keys())
