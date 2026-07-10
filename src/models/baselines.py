@@ -29,15 +29,14 @@ class KMeans(OutlierDetector):
 
     def __init__(
         self,
-        group_id="series_id",
-        target_id: str = "target",
-        window_size=7,
-        threshold: tuple[float, float] = (0.1, 0.1),
+        window_size=600,
+        k=10,
+        threshold: float = 0.95,
     ):
         super().__init__()
         self.scorer = KMeansScorer(
-            k=10,
-            window=600,
+            k=k,
+            window=window_size,
             component_wise=False,
         )
         self.threshold = threshold
@@ -55,7 +54,16 @@ class KMeans(OutlierDetector):
         if self.scorer is None:
             raise RuntimeError("KMeans must be trained before scoring.")
 
-        scores: list[TimeSeries] = [self.scorer.score(ts) for ts in test]  # type: ignore
+        # distância de cada ponto ao seu centroide
+        scores: list[TimeSeries] = []
+
+        for ts in test:
+            distances: list[TimeSeries] = self.scorer.score(ts)  # type: ignore
+            distances_np = np.array(distances)
+            threshold = np.percentile(distances_np, self.threshold * 100)
+            binary = (distances_np > threshold).astype(int)
+            scores.append(TimeSeries.from_values(binary))
+
         return {self.__class__.__name__: scores}
 
     def metrics(self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap) -> DetectionSummaryMap:
@@ -99,19 +107,21 @@ class Hampel(OutlierDetector):
         Quanto maior o escore, mais anômalo o ponto.
         """
         scores: list[TimeSeries] = []
-
+        k = 1.4826  # fator de escala para MAD ~ desvio padrão normal
         for ts in test:
             data = np.asarray(ts.univariate_values(), dtype=float)
             windows = extract_windows(data, self.window_size, centered=True)
 
             median = np.median(windows, axis=1)
             mad = np.median(np.abs(windows - median[:, None]), axis=1)
-            sigma = 1.4826 * mad
-
+            sigma = k * mad
+            threshold = self.n_sigmas * sigma
             # ponytail: onde sigma == 0 (janela constante), score é 0
-            score_vals = np.where(sigma > 0, np.abs(data - median) / sigma, 0.0)
+            diff = np.abs(data - median) / sigma
+            diff = np.where(sigma > 0,diff , 0.0)
 
-            scores.append(TimeSeries.from_values(score_vals))
+            binary = (diff > threshold).astype(int)
+            scores.append(TimeSeries.from_values(binary))
 
         return {self.__class__.__name__: scores}
 
@@ -184,8 +194,10 @@ class LocalOutlierFactor(OutlierDetector):
             windows = extract_windows(vals, ws, centered=True)
             # score_samples retorna valores negativos, mais negativo = mais anômalo
             # invertemos: positivo grande = mais anômalo
-            score_vals = -self.model.score_samples(windows).ravel()
-            scores.append(TimeSeries.from_values(score_vals))
+            score_vals = self.model.predict(windows).ravel()
+            binary = (score_vals == -1).astype(int)
+
+            scores.append(TimeSeries.from_values(binary))
 
         return {self.__class__.__name__: scores}
 
@@ -257,8 +269,10 @@ class IsolationForest(OutlierDetector):
         for ts in test:
             vals = ts.values(copy=False).flatten()
             windows = extract_windows(vals, ws, centered=True)
-            score_vals = -self.model.decision_function(windows).ravel()
-            scores.append(TimeSeries.from_values(score_vals))
+            score_vals = -self.model.predict(windows).ravel()
+            binary = (score_vals == -1).astype(int)
+
+            scores.append(TimeSeries.from_values(binary))
 
         return {self.__class__.__name__: scores}
 
