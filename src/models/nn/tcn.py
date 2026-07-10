@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from lightning import LightningModule
 from pytorch_tcn import TCN
 
-from src.pipelines.metrics import build_test_metrics, build_validation_metrics
+from src.pipelines.metrics import CentralMetricsStore, build_test_metrics, build_validation_metrics
 
 
 class TCN_train(LightningModule):
@@ -47,6 +47,7 @@ class TCN_train(LightningModule):
 
         self.val_metrics = build_validation_metrics()
         self.test_metrics = build_test_metrics()
+        self.test_recon_metrics = build_validation_metrics()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (batch, window)
@@ -72,10 +73,25 @@ class TCN_train(LightningModule):
 
         return loss
 
+    def test_step(self, batch, batch_idx) -> torch.Tensor:
+        x, y = batch
+        recon = self(x)
+        loss = F.mse_loss(recon, x)
+        self.log("test_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.test_recon_metrics.update(recon, x)
+        return loss
+
     def on_validation_epoch_end(self):
         metrics = self.val_metrics.compute()
         self.log_dict(metrics)
+        CentralMetricsStore.add(self.__class__.__name__, "validation", metrics)
         self.val_metrics.reset()
+
+    def on_test_epoch_end(self):
+        metrics = self.test_recon_metrics.compute()
+        self.log_dict(metrics)
+        CentralMetricsStore.add(self.__class__.__name__, "test", metrics)
+        self.test_recon_metrics.reset()
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)

@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from lightning import LightningModule
-from src.pipelines.metrics import build_test_metrics, build_validation_metrics
+from src.pipelines.metrics import CentralMetricsStore, build_test_metrics, build_validation_metrics
 
 
 class VAE(LightningModule):
@@ -52,6 +52,7 @@ class VAE(LightningModule):
 
         self.val_metrics = build_validation_metrics()
         self.test_metrics = build_test_metrics()
+        self.test_recon_metrics = build_validation_metrics()
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         h = self.encoder(x)
@@ -112,10 +113,34 @@ class VAE(LightningModule):
         self.val_metrics.update(x_recon, x)
         return loss
 
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        mu, logvar = self.encode(x)
+        z = self.reparameterize(mu, logvar)
+        x_recon = self.decode(z)
+
+        recon_loss = F.mse_loss(x_recon, x, reduction="sum")
+        kl = self.kl_formula(logvar, mu)
+        loss = recon_loss + kl
+
+        self.log("test_loss", loss, prog_bar=True)
+        self.log("test_recon_loss", recon_loss, prog_bar=False)
+        self.log("test_kl_loss", kl, prog_bar=False)
+
+        self.test_recon_metrics.update(x_recon, x)
+        return loss
+
     def on_validation_epoch_end(self):
         metrics = self.val_metrics.compute()
         self.log_dict(metrics)
+        CentralMetricsStore.add(self.__class__.__name__, "validation", metrics)
         self.val_metrics.reset()
+
+    def on_test_epoch_end(self):
+        metrics = self.test_recon_metrics.compute()
+        self.log_dict(metrics)
+        CentralMetricsStore.add(self.__class__.__name__, "test", metrics)
+        self.test_recon_metrics.reset()
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
         return torch.optim.Adam(self.parameters(), lr=self.lr)
