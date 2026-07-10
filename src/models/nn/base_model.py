@@ -161,7 +161,7 @@ class OutlierModelWrapper(OutlierDetector):
 
             model.eval()
             all_mse: list[np.ndarray] = []
-
+            logging.info(f"TESTANDO MODELO {name}!")
             with torch.no_grad():
                 for batch in self.val_loader:
                     x, _ = batch
