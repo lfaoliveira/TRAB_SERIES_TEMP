@@ -6,12 +6,15 @@ from typing import Optional, cast
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+from torchmetrics import MetricCollection
 from darts import TimeSeries
 
 from lightning import LightningModule, Trainer
 from torch.utils.data import DataLoader
 from src.models.outlier import OutlierDetector
 from src.pipelines.metrics import (
+    CentralMetricsStore,
     DetectionMetricSummary,
     ScoreSeriesMap,
     ValidationMetrics,
@@ -67,6 +70,7 @@ class OutlierModelWrapper(OutlierDetector):
         test: list[TimeSeries],
         test_labels: list[TimeSeries],
     ) -> dict[str, DetectionMetricSummary]:
+
         return OutlierDetector.apply(self, train, train_labels, test, test_labels)
 
     def fit(
@@ -196,4 +200,17 @@ class OutlierModelWrapper(OutlierDetector):
         else:
             device = torch.device("cpu")
 
-        return calculate_detection_summary(test_labels, scores, device)
+        model_test_metrics = {
+            name: cast(MetricCollection, model.test_metrics)
+            for name, model in (self.model_dict or {}).items()
+            if model is not None and hasattr(model, "test_metrics")
+        }
+        detect_metrics = calculate_detection_summary(
+            test_labels, scores, device, model_test_metrics=model_test_metrics
+        )
+        for name, met_collection in model_test_metrics.items():
+            valores = detect_metrics[name]
+            print(f"METRICAS: {valores}")
+            CentralMetricsStore.add(name, "test", cast(dict, valores))
+
+        return detect_metrics
