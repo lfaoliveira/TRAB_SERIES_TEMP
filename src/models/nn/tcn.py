@@ -18,6 +18,7 @@ class TCN_train(LightningModule):
 
     def __init__(
         self,
+        window_size: int,
         num_channels: list[int] = [],
         use_norm: Literal["weight_norm", "batch_norm"] = "weight_norm",
         lr: float = 1e-3,
@@ -28,10 +29,13 @@ class TCN_train(LightningModule):
 
         if not num_channels:
             num_channels = [1, 64, 64, 128, 256, 512]
-        HORIZON = 1
+        HORIZON = window_size
+
+        # embed_dim = window_size
+        out_channels_tcn = num_channels[-1]
 
         self.tcn = TCN(
-            num_inputs=HORIZON,
+            num_inputs=1,  # recebe apenas 1 canal
             num_channels=num_channels,
             kernel_size=5,
             dilations=None,  # DILATACAO PADRAO exponencial
@@ -43,16 +47,19 @@ class TCN_train(LightningModule):
             use_skip_connections=True,
             input_shape="NCL",  # exige input (batch size, number of input channels, sequence length)
             embedding_shapes=None,  # SEM EMBEDDINGS, PRA SIMPLIFICAR
-            output_projection=1,  # PROJETA DE VOLTA PRA DIM DO INPUT
+            # output_projection=1,  # PROJETA DE VOLTA PRA DIM DO INPUT
+            output_projection=out_channels_tcn,  # COM ATTENTION, NÃO PRECISA REPROJETAR PRO INPUT
             output_activation=None,  # APENAS RECONSTRUCAO, SEM CLASSIFICACAO DIRETA
         )
 
-        self.attn = nn.MultiheadAttention(embed_dim=self.tcn, num_heads=4, batch_first=True)
+        self.attn = nn.MultiheadAttention(
+            embed_dim=out_channels_tcn, num_heads=4, batch_first=True
+        )  # formato esperado: (batch, seq_len ou window_size, embed_dim)
 
-        self.attn_norm = nn.LayerNorm(num_channels[-1])
+        self.attn_norm = nn.LayerNorm(out_channels_tcn)
 
         # --- Cabeça de previsão ---
-        self.head = nn.Linear(num_channels[-1], HORIZON)
+        self.head = nn.Linear(out_channels_tcn, HORIZON)
 
         self.val_metrics = build_validation_metrics()
         self.test_metrics = build_test_metrics()
@@ -60,8 +67,9 @@ class TCN_train(LightningModule):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (batch, window)
-        x = x.unsqueeze(1)  # (batch, window, 1)
-        tcn_out: torch.Tensor = self.tcn(x).squeeze(1)
+        x = x.unsqueeze(1)  # (batch, 1, window)
+        tcn_out: torch.Tensor = self.tcn(x)  # retorno: (batch, num_channels[-1], window)
+        tcn_out = tcn_out.transpose(1, 2)  # (batch, window, channel)
         seq_len = tcn_out.size(1)
         causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device, dtype=torch.bool), diagonal=1)
 
