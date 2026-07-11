@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+import logging
 
 import numpy as np
 import torch
@@ -58,8 +59,8 @@ class KMeans(OutlierDetector):
         scores: list[TimeSeries] = []
 
         for ts in test:
-            distances: list[TimeSeries] = self.scorer.score(ts)  # type: ignore
-            distances_np = np.array(distances)
+            distances = self.scorer.score(ts)
+            distances_np = distances.values(copy=False).flatten()  # type: ignore
             threshold = np.percentile(distances_np, self.threshold * 100)
             binary = (distances_np > threshold).astype(int)
             scores.append(TimeSeries.from_values(binary))
@@ -118,7 +119,7 @@ class Hampel(OutlierDetector):
             threshold = self.n_sigmas * sigma
             # ponytail: onde sigma == 0 (janela constante), score é 0
             diff = np.abs(data - median) / sigma
-            diff = np.where(sigma > 0,diff , 0.0)
+            diff = np.where(sigma > 0, diff, 0.0)
 
             binary = (diff > threshold).astype(int)
             scores.append(TimeSeries.from_values(binary))
