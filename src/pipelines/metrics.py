@@ -1,11 +1,12 @@
 from collections.abc import Sequence
-from typing import TypeAlias, TypedDict
+import logging
+from typing import TypeAlias, TypedDict, cast
 
 from darts import TimeSeries
+import numpy as np
 from torch import Tensor
 import torch
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from torchmetrics import (
     ConfusionMatrix,
     FBetaScore,
@@ -25,9 +26,6 @@ class ValidationMetricLog(TypedDict, total=False):
 
 
 class TestMetricLog(TypedDict, total=False):
-    val_mse: float | Tensor
-    val_smape: float | Tensor
-    val_mae: float | Tensor
     f1: float | Tensor
     precision: float | Tensor
     recall: float | Tensor
@@ -46,20 +44,49 @@ DetectionSummaryMap: TypeAlias = dict[str, DetectionMetricSummary]
 
 class CentralMetricsStore:
     _data: dict[str, dict[str, list[dict[str, float]]]] = {}
+    _confusion_matrices: dict[str, dict[str, list[list[list[int]]]]] = {}
 
     @classmethod
     def clear(cls) -> None:
         cls._data = {}
+        cls._confusion_matrices = {}
 
     @classmethod
     def add(cls, model_name: str, split: str, metrics: dict[str, Tensor | float]) -> None:
         split_store = cls._data.setdefault(model_name, {}).setdefault(split, [])
-        split_store.append(
-            {
-                name: float(value.detach().cpu()) if isinstance(value, Tensor) else float(value)
-                for name, value in metrics.items()
-            }
-        )
+
+        scalar_metrics: dict[str, float] = {}
+        for name, value in metrics.items():
+            if isinstance(value, Tensor):
+                if value.numel() == 1:
+                    scalar_metrics[name] = float(value.detach().cpu())
+                else:
+                    # tensor multi-elemento (ex: matriz de confusão) -> loga separadamente
+                    logging.debug(f"CentralMetricsStore: tensor multi-elemento {value}")
+                    cls.add_confusion_matrix(model_name, split, value)
+            elif isinstance(value, (int, float)):
+                scalar_metrics[name] = float(value)
+            # strings (ex: "name") e outros tipos não-numéricos são ignorados aqui
+
+        split_store.append(scalar_metrics)
+
+    @classmethod
+    def add_confusion_matrix(cls, model_name: str, split: str, cm: Tensor | np.ndarray) -> None:
+        """
+        Loga uma matriz de confusão (2D) para plotar posteriormente.
+        Aceita Tensor ou ndarray, converte para lista aninhada de ints.
+        """
+        if isinstance(cm, Tensor):
+            cm_list = cm.detach().cpu().to(torch.int64).tolist()
+        else:
+            cm_list = np.asarray(cm).astype(int).tolist()
+
+        store = cls._confusion_matrices.setdefault(model_name, {}).setdefault(split, [])
+        store.append(cm_list)
+
+    @classmethod
+    def get_confusion_matrices(cls, model_name: str, split: str = "test") -> list[list[list[int]]]:
+        return cls._confusion_matrices.get(model_name, {}).get(split, [])
 
     @classmethod
     def as_dict(cls) -> dict[str, dict[str, list[dict[str, float]]]]:
@@ -100,6 +127,44 @@ class CentralMetricsStore:
             metric_name: cls.plot_metric(metric_name, split=split) for metric_name in sorted(metric_names)
         }
 
+    @classmethod
+    def plot_confusion_matrix(cls, model_name: str, split: str = "test", index: int = -1) -> go.Figure:
+        """
+        Plota a matriz de confusão de um modelo/split específico como heatmap.
+        `index` seleciona qual matriz logada (-1 = última, útil se houver várias épocas/runs).
+        """
+        matrices = cls.get_confusion_matrices(model_name, split)
+        if not matrices:
+            raise ValueError(f"Nenhuma matriz de confusão encontrada para '{model_name}' / '{split}'.")
+
+        cm = np.array(matrices[index])
+        labels = ["Normal", "Outlier"] if cm.shape == (2, 2) else [str(i) for i in range(cm.shape[0])]
+
+        fig = go.Figure(
+            data=go.Heatmap(
+                z=cm,
+                x=[f"Predito: {label}" for label in labels],
+                y=[f"Real: {label}" for label in labels],
+                text=cm,
+                texttemplate="%{text}",
+                colorscale="Blues",
+            )
+        )
+        fig.update_layout(
+            title=f"Matriz de Confusão — {model_name} ({split})",
+            template="plotly_white",
+            yaxis_autorange="reversed",  # mantém a origem no canto superior esquerdo
+        )
+        return fig
+
+    @classmethod
+    def plot_all_confusion_matrices(cls, split: str = "test") -> dict[str, go.Figure]:
+        return {
+            model_name: cls.plot_confusion_matrix(model_name, split=split)
+            for model_name in cls._confusion_matrices
+            if cls._confusion_matrices[model_name].get(split)
+        }
+
 
 CentralMetricsPlotter = CentralMetricsStore
 
@@ -136,12 +201,19 @@ def anomaly_detect_mse(mse_tensor: torch.Tensor, threshold: float) -> torch.Tens
 
 
 def calculate_detection_summary(
-    test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap, device: torch.device
+    test_labels: Sequence[TimeSeries],
+    scores: ScoreSeriesMap,
+    device: torch.device,
+    model_test_metrics: dict[str, MetricCollection] | None = None,
 ) -> DetectionSummaryMap:
     result: DetectionSummaryMap = {}
 
     for name, model_scores in scores.items():
-        test_metrics = build_test_metrics().to(device)
+        if model_test_metrics is not None and name in model_test_metrics:
+            test_metrics = model_test_metrics[name].to(device)
+            test_metrics.reset()
+        else:
+            test_metrics = build_test_metrics().to(device)
 
         for label_ts, score_ts in zip(test_labels, model_scores):
             labels = torch.as_tensor(label_ts.values(copy=False).flatten(), device=device)
@@ -150,10 +222,9 @@ def calculate_detection_summary(
             labels = labels.to(dtype=torch.int)
             test_metrics.update(scores_tensor, labels)
 
-        test_result: dict[str, float] = test_metrics.compute()
-
-        result[name] = test_result
-        result[name]["name"] = name
+        test_result = test_metrics.compute()
+        test_result["name"] = name  # type: ignore[arg-type]
+        result[name] = cast(DetectionMetricSummary, test_result)
 
     return result
 
