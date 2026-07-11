@@ -1,6 +1,7 @@
 from typing import Literal
 
 import torch
+from torch import nn
 import torch.nn.functional as F
 from lightning import LightningModule
 from pytorch_tcn import TCN
@@ -27,9 +28,10 @@ class TCN_train(LightningModule):
 
         if not num_channels:
             num_channels = [1, 64, 64, 128, 256, 512]
+        HORIZON = 1
 
-        self.model = TCN(
-            num_inputs=1,
+        self.tcn = TCN(
+            num_inputs=HORIZON,
             num_channels=num_channels,
             kernel_size=5,
             dilations=None,  # DILATACAO PADRAO exponencial
@@ -45,6 +47,13 @@ class TCN_train(LightningModule):
             output_activation=None,  # APENAS RECONSTRUCAO, SEM CLASSIFICACAO DIRETA
         )
 
+        self.attn = nn.MultiheadAttention(embed_dim=self.tcn, num_heads=4, batch_first=True)
+
+        self.attn_norm = nn.LayerNorm(num_channels[-1])
+
+        # --- Cabeça de previsão ---
+        self.head = nn.Linear(num_channels[-1], HORIZON)
+
         self.val_metrics = build_validation_metrics()
         self.test_metrics = build_test_metrics()
         self.test_recon_metrics = build_validation_metrics()
@@ -52,8 +61,30 @@ class TCN_train(LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (batch, window)
         x = x.unsqueeze(1)  # (batch, window, 1)
-        recon = self.model(x)
-        return recon.squeeze(1)  # (batch, window)
+        tcn_out: torch.Tensor = self.tcn(x).squeeze(1)
+        seq_len = tcn_out.size(1)
+        causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device, dtype=torch.bool), diagonal=1)
+
+        attn_out: torch.Tensor | None
+        attn_weights: torch.Tensor | None
+
+        attn_out, attn_weights = self.attn(
+            query=tcn_out,
+            key=tcn_out,
+            value=tcn_out,
+            attn_mask=causal_mask,
+            need_weights=True,  # útil pra visualizar depois quais timesteps importaram
+        )
+        assert attn_out is not None and attn_weights is not None
+
+        # Conexão residual + normalização (padrão tipo Transformer)
+        out = self.attn_norm(tcn_out + attn_out)
+
+        # Usa o último timestep para prever o horizonte futuro
+        last_step = out[:, -1, :]  # (batch, d_model)
+        recon = self.head(last_step)  # (batch, forecast_horizon)
+
+        return recon  # (batch, window)
 
     def training_step(self, batch, batch_idx) -> torch.Tensor:
         x, y = batch
