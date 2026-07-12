@@ -350,6 +350,18 @@ wheels = [
 ]
 
 [[package]]
+name = "colorlog"
+version = "6.10.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a2/61/f083b5ac52e505dfc1c624eafbf8c7589a0d7f32daa398d2e7590efa5fda/colorlog-6.10.1.tar.gz", hash = "sha256:eb4ae5cb65fe7fec7773c2306061a8e63e02efc2c72eba9d27b0fa23c94f1321", size = 17162, upload-time = "2025-10-16T16:14:11.978Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6d/c1/e419ef3723a074172b68aaa89c9f3de486ed4c2399e2dbd8113a4fdcaf9e/colorlog-6.10.1-py3-none-any.whl", hash = "sha256:2d7e8348291948af66122cff006c9f8da6255d224e7cf8e37d8de2df3bad8c9c", size = 11743, upload-time = "2025-10-16T16:14:10.512Z" },
+]
+
+[[package]]
 name = "comm"
 version = "0.2.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1810,6 +1822,41 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3d/f9/88d94a75de065ea32619465d2f77b29a0469500e99012523b91cc4141cd1/openpyxl-3.1.5.tar.gz", hash = "sha256:cf0e3cf56142039133628b5acffe8ef0c12bc902d2aadd3e0fe5878dc08d1050", size = 186464, upload-time = "2024-06-28T14:03:44.161Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl", hash = "sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2", size = 250910, upload-time = "2024-06-28T14:03:41.161Z" },
+]
+
+[[package]]
+name = "optuna"
+version = "4.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "alembic" },
+    { name = "colorlog" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pyyaml" },
+    { name = "sqlalchemy" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f4/aa/05f5e3f662cc96a4c478fc3446b8ed6359825a2b504ecb614a9ac84e4a4d/optuna-4.9.0.tar.gz", hash = "sha256:b322e5cbdf1655fb84c37646c4a7a1f391de1b47806bbe222e015825d0a82b87", size = 485834, upload-time = "2026-06-01T06:23:30.424Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ab/f3/e5fcd5d9b15771ed6dc10e3a7eeddc672e418f4f4c4653d216cc1d857e2d/optuna-4.9.0-py3-none-any.whl", hash = "sha256:f52f3be6148654850c92a5860d398fd88ec6b2c84ab68d9c3d07dcff02e7afee", size = 425553, upload-time = "2026-06-01T06:23:28.804Z" },
+]
+
+[[package]]
+name = "optuna-integration"
+version = "4.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "optuna" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/38/15/378c53a5fce6924be331ba7a7e0b3227f1d2ec8a0c8461c3d2475e5ba2e8/optuna_integration-4.9.0.tar.gz", hash = "sha256:c650615ea52259f518fee245be4f63be55c7495ffc7361d05e5054496ec427b8", size = 89927, upload-time = "2026-06-01T06:11:53.237Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bf/5b/05b6bc0e2fa1dd09d96f75d6cddfeaaaafde6028f89bbfb45e006a82a89a/optuna_integration-4.9.0-py3-none-any.whl", hash = "sha256:578dccd6657c12e0457750512ce718d4e3dab8730fa36dcd0b502eacfaa1e795", size = 103447, upload-time = "2026-06-01T06:11:51.831Z" },
+]
+
+[package.optional-dependencies]
+pytorch-lightning = [
+    { name = "lightning" },
 ]
 
 [[package]]
@@ -3311,6 +3358,8 @@ dependencies = [
     { name = "nbformat" },
     { name = "numpy" },
     { name = "openpyxl" },
+    { name = "optuna" },
+    { name = "optuna-integration", extra = ["pytorch-lightning"] },
     { name = "pandas" },
     { name = "plotly" },
     { name = "pyarrow" },
@@ -3336,6 +3385,7 @@ kaggle = [
     { name = "lightning" },
     { name = "logging" },
     { name = "mlflow" },
+    { name = "optuna" },
     { name = "pytorch-tcn" },
     { name = "pyyaml" },
     { name = "statsmodels" },
@@ -3353,6 +3403,8 @@ requires-dist = [
     { name = "nbformat", specifier = ">=5.10.4" },
     { name = "numpy", specifier = "<=2.4" },
     { name = "openpyxl", specifier = ">=3.1.5" },
+    { name = "optuna", specifier = ">=4.9.0" },
+    { name = "optuna-integration", extras = ["pytorch-lightning"], specifier = ">=4.9.0" },
     { name = "pandas", specifier = ">=3.0.2" },
     { name = "plotly", specifier = ">=6.8.0" },
     { name = "pyarrow", specifier = ">=24.0.0" },
@@ -3377,6 +3429,7 @@ kaggle = [
     { name = "lightning", specifier = ">=2.6.5" },
     { name = "logging", specifier = ">=0.4.9.6" },
     { name = "mlflow", specifier = ">=1.27.0" },
+    { name = "optuna", specifier = ">=4.9.0" },
     { name = "pytorch-tcn", specifier = ">=1.2.3" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "statsmodels", specifier = ">=0.14.6" },
