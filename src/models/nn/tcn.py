@@ -47,7 +47,6 @@ class TCN_train(LightningModule):
             use_skip_connections=True,
             input_shape="NCL",  # exige input (batch size, number of input channels, sequence length)
             embedding_shapes=None,  # SEM EMBEDDINGS, PRA SIMPLIFICAR
-            # output_projection=1,  # PROJETA DE VOLTA PRA DIM DO INPUT
             output_projection=out_channels_tcn,  # COM ATTENTION, NÃO PRECISA REPROJETAR PRO INPUT
             output_activation=None,  # APENAS RECONSTRUCAO, SEM CLASSIFICACAO DIRETA
         )
@@ -71,7 +70,8 @@ class TCN_train(LightningModule):
         tcn_out: torch.Tensor = self.tcn(x)  # retorno: (batch, num_channels[-1], window)
         tcn_out = tcn_out.transpose(1, 2)  # (batch, window, channel)
         seq_len = tcn_out.size(1)
-        causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device, dtype=torch.bool), diagonal=1)
+        # Criar na CPU primeiro e mover usando .to() evita deadlocks de sincronização em containers instáveis
+        causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool), diagonal=1).to(x.device)
 
         attn_out: torch.Tensor | None
         attn_weights: torch.Tensor | None
