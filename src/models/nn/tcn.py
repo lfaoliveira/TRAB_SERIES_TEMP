@@ -1,3 +1,4 @@
+import logging
 from typing import Literal
 
 import torch
@@ -64,6 +65,8 @@ class TCN_train(LightningModule):
         self.test_metrics = build_test_metrics()
         self.test_recon_metrics = build_validation_metrics()
 
+        self.heartbeat = 0
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (batch, window)
         x = x.unsqueeze(1)  # (batch, 1, window)
@@ -125,6 +128,8 @@ class TCN_train(LightningModule):
         self.log_dict(metrics)
         CentralMetricsStore.add(self.__class__.__name__, "validation", metrics)
         self.val_metrics.reset()
+
+        self.heartbeat += 1
 
     def on_test_epoch_end(self):
         metrics = self.test_recon_metrics.compute()

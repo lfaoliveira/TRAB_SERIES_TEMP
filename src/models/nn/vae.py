@@ -1,3 +1,5 @@
+import logging
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -27,6 +29,7 @@ class VAE(LightningModule):
         self.save_hyperparameters()
 
         self.lr = lr
+        self.heartbeat = 0
 
         # Encoder
 
@@ -135,6 +138,8 @@ class VAE(LightningModule):
         self.log_dict(metrics)
         CentralMetricsStore.add(self.__class__.__name__, "validation", metrics)
         self.val_metrics.reset()
+
+        self.heartbeat += 1
 
     def on_test_epoch_end(self):
         metrics = self.test_recon_metrics.compute()

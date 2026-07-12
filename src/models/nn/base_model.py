@@ -21,6 +21,7 @@ from src.pipelines.metrics import (
     calculate_detection_summary,
 )
 from src.data.dataset import SlidingWindowDataset
+from lightning.pytorch.callbacks import Callback
 
 
 class OutlierModelWrapper(OutlierDetector):
@@ -50,10 +51,10 @@ class OutlierModelWrapper(OutlierDetector):
         batch_size: int = 32,
         max_epochs: int = 10,
         accelerator: str = "cuda",
-        trainer_callbacks: list | None = None,
+        trainer_callbacks: list[Callback] | None = None,
         enable_progress_bar: bool = True,
         enable_model_summary: bool = True,
-        hyper_optim: bool = False
+        hyper_optim: bool = False,
     ) -> None:
         OutlierDetector.__init__(self)
 
@@ -149,7 +150,7 @@ class OutlierModelWrapper(OutlierDetector):
             self.trainer.fit(model, train_dataloaders=self.train_loader, val_dataloaders=self.val_loader)
             gc.collect()
             torch.cuda.empty_cache()
-            
+
             if self.hyper_optim:
                 break
 
