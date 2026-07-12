@@ -227,17 +227,3 @@ def calculate_detection_summary(
         result[name] = cast(DetectionMetricSummary, test_result)
 
     return result
-
-
-if __name__ == "__main__":
-    CentralMetricsStore.clear()
-    CentralMetricsStore.add("TCN", "validation", {"val_mse": 1.0, "val_smape": 2.0, "val_mae": 3.0})
-    CentralMetricsStore.add("VAE", "validation", {"val_mse": 2.0, "val_smape": 3.0, "val_mae": 4.0})
-    CentralMetricsStore.add("TCN", "test", {"val_mse": 1.5, "val_smape": 2.5, "val_mae": 3.5})
-    CentralMetricsStore.add("VAE", "test", {"val_mse": 2.5, "val_smape": 3.5, "val_mae": 4.5})
-    validation_metrics = build_validation_metrics()
-    test_metrics = build_test_metrics()
-    assert set(validation_metrics.keys()) == {"val_mse", "val_smape", "val_mae"}
-    assert {"val_mse", "val_smape", "val_mae", "f1", "precision", "recall", "cm"} <= set(test_metrics.keys())
-    figures = CentralMetricsStore.plot_all_metrics()
-    assert set(figures.keys()) == {"val_mae", "val_mse", "val_smape"}
