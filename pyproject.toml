@@ -27,6 +27,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "statsmodels>=0.14.6",
     "torch>=2.6.0",
+    "torchmetrics>=1.9.0",
 ]
 
 [dependency-groups]
@@ -54,7 +55,7 @@ all = "task lint && task test"
 # Instala versao com CUDA apenas em ambientes Linux (pensando no Kaggle)
 torch = [
     { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
-    { index = "pytorch-cu124", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
 ]
 
 # index CPU
@@ -65,6 +66,6 @@ explicit = true
 
 # INDEX GPU
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
