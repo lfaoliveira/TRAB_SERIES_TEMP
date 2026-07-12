@@ -42,15 +42,18 @@ class OutlierModelWrapper(OutlierDetector):
 
     def __init__(
         self,
-        input_dim: int,
+        model_dict: dict[str, LightningModule],
         dev=False,
-        model_dict: Optional[dict[str, LightningModule]] = None,
         window_size: int = 20,
         lr: float = 1e-3,
         threshold: float = 0.99,
         batch_size: int = 32,
         max_epochs: int = 10,
         accelerator: str = "cuda",
+        trainer_callbacks: list | None = None,
+        enable_progress_bar: bool = True,
+        enable_model_summary: bool = True,
+        hyper_optim: bool = False
     ) -> None:
         OutlierDetector.__init__(self)
 
@@ -62,6 +65,10 @@ class OutlierModelWrapper(OutlierDetector):
         self.model_dict = model_dict
         self.dev = dev
         self.threshold = threshold
+        self.trainer_callbacks = trainer_callbacks or []
+        self._enable_progress_bar = enable_progress_bar
+        self._enable_model_summary = enable_model_summary
+        self.hyper_optim = hyper_optim
 
     def pipeline(
         self,
@@ -106,6 +113,7 @@ class OutlierModelWrapper(OutlierDetector):
         # --- Train loader: janelas do treino (normais) ---
         self.train_loader = DataLoader(
             self.train_dataset,
+            num_workers=0,
             batch_size=self.batch_size,
             shuffle=False,
         )
@@ -113,17 +121,21 @@ class OutlierModelWrapper(OutlierDetector):
         # --- Val loader: janelas do teste (contêm anomalias reais) ---
         self.val_loader = DataLoader(
             self.test_dataset,
+            num_workers=0,
             batch_size=self.batch_size,
             shuffle=False,
         )
 
         self.trainer = Trainer(
+            devices=1,
             fast_dev_run=self.dev,
             max_epochs=self.max_epochs,
             accelerator=self._accelerator,
             enable_checkpointing=False,
             logger=True,
-            enable_progress_bar=True,
+            enable_progress_bar=self._enable_progress_bar,
+            enable_model_summary=self._enable_model_summary,
+            callbacks=self.trainer_callbacks,
         )
 
         assert self.model_dict is not None
@@ -137,6 +149,9 @@ class OutlierModelWrapper(OutlierDetector):
             self.trainer.fit(model, train_dataloaders=self.train_loader, val_dataloaders=self.val_loader)
             gc.collect()
             torch.cuda.empty_cache()
+            
+            if self.hyper_optim:
+                break
 
     def test_scorer(self, test: list[TimeSeries]) -> ScoreSeriesMap:
         """
