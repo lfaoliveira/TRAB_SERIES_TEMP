@@ -132,7 +132,7 @@ class HyperparamOptim:
             model_dict=model_dict,
             max_epochs=self.max_epochs,
             trainer_callbacks=[pruning_callback, early_stop],
-            enable_progress_bar=False,
+            enable_progress_bar=True,
             enable_model_summary=False,
             **self.fixed_params,
             **wrapper_params,
