@@ -94,6 +94,10 @@ class CentralMetricsStore:
 
     @classmethod
     def plot_metric(cls, metric_name: str, split: str = "validation") -> go.Figure:
+        # precision, recall e f1 são interdependentes — plota como tabela única
+        if metric_name in {"precision", "recall", "f1"}:
+            return cls._plot_detection_table(split=split)
+
         fig = go.Figure()
 
         for model_name, model_splits in cls._data.items():
@@ -114,6 +118,42 @@ class CentralMetricsStore:
             yaxis_title=metric_name,
             template="plotly_white",
         )
+        return fig
+
+    @classmethod
+    def _plot_detection_table(cls, split: str = "test") -> go.Figure:
+        headers = ["Modelo", "Precision", "Recall", "F1"]
+        col_model: list[str] = []
+        col_precision: list[str] = []
+        col_recall: list[str] = []
+        col_f1: list[str] = []
+
+        for model_name, model_splits in cls._data.items():
+            epoch_metrics = model_splits.get(split, [])
+            if not epoch_metrics:
+                continue
+            # última época que contém as 3 métricas
+            last = epoch_metrics[-1]
+            p = last.get("precision")
+            r = last.get("recall")
+            f = last.get("f1")
+            if p is not None and r is not None and f is not None:
+                col_model.append(model_name)
+                col_precision.append(f"{p:.4f}")
+                col_recall.append(f"{r:.4f}")
+                col_f1.append(f"{f:.4f}")
+
+        fig = go.Figure(
+            data=go.Table(
+                header=dict(values=headers, align="left"),
+                cells=dict(
+                    values=[col_model, col_precision, col_recall, col_f1],
+                    align="left",
+                    format=[None, ".4f", ".4f", ".4f"],
+                ),
+            )
+        )
+        fig.update_layout(title=f"Métricas de Detecção ({split})", template="plotly_white")
         return fig
 
     @classmethod
