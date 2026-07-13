@@ -8,7 +8,7 @@ from typing import Any
 
 import optuna
 from optuna.integration import PyTorchLightningPruningCallback
-from lightning.pytorch.callbacks import EarlyStopping
+from lightning.pytorch.callbacks import Callback, EarlyStopping
 
 from src.models.nn.base_model import OutlierModelWrapper
 
@@ -66,6 +66,7 @@ class HyperparamOptim:
         n_trials: int = 30,
         direction: str = "maximize",
         study_name: str | None = None,
+        callbacks: list[Callback] = [],
     ) -> None:
         self.model_factory = model_factory
         self.param_suggester = param_suggester
@@ -79,6 +80,7 @@ class HyperparamOptim:
         self.study_name = study_name
 
         self.model_count = 0
+        self.callbacks = callbacks
 
     # ------------------------------------------------------------------
     # API pública
@@ -126,12 +128,13 @@ class HyperparamOptim:
         # 4. Prepara callbacks: EarlyStopping + pruning
         pruning_callback = PyTorchLightningPruningCallback(trial, monitor="val_loss")
         early_stop = EarlyStopping(monitor="val_loss", patience=self.patience)
+        self.callbacks.extend([pruning_callback, early_stop])
 
         # 5. Monta o wrapper
         wrapper = OutlierModelWrapper(
             model_dict=model_dict,
             max_epochs=self.max_epochs,
-            trainer_callbacks=[pruning_callback, early_stop],
+            trainer_callbacks=self.callbacks,
             enable_progress_bar=True,
             enable_model_summary=False,
             **self.fixed_params,
