@@ -114,6 +114,7 @@ class HyperparamOptim:
 
     def objective(self, trial: optuna.Trial) -> float:
         # 1. Amostra hiperparâmetros
+        logging.info(f"TRAIL: {trial.number} / {self.n_trials}")
         params = self.param_suggester(trial)
 
         # 2. Separa params do wrapper vs params do modelo
@@ -135,7 +136,7 @@ class HyperparamOptim:
             model_dict=model_dict,
             max_epochs=self.max_epochs,
             trainer_callbacks=self.callbacks,
-            enable_progress_bar=True,
+            enable_progress_bar=False,
             enable_model_summary=False,
             **self.fixed_params,
             **wrapper_params,
