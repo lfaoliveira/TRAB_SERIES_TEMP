@@ -79,6 +79,7 @@ class NasaDataset:
 
         # Convert to long format -----------------------------------------------
         self.df_test, self.tam_dataset = self.multi_to_df(test_wide, include_labels=True, drop=True)
+        self.df_train = self.multi_to_df(train_wide, include_labels=False, drop=True)
         if prototype:
             self.df_test[:10_000].to_csv(export_path / "./test.csv")
 
@@ -323,25 +324,42 @@ class NasaDataset:
         self, train_split: float
     ) -> tuple[Sequence[TimeSeries], Sequence[TimeSeries], Sequence[TimeSeries], Sequence[TimeSeries]]:
 
-        logging.info(f"DF TEST: {self.df_test}")
-        logging.info(f"COLUNAS: {self.df_test.columns}")
-        dataset = TimeSeries.from_group_dataframe(
+        # Valores de treino vêm de self.df_train (já é o conjunto de treino)
+        train_values = TimeSeries.from_group_dataframe(
+            self.df_train,
+            group_cols="series_id",
+            time_col="time_idx",
+            value_cols=self.feature_cols,
+        )
+
+        # Valores de teste vêm de self.df_test (já é o conjunto de teste)
+        test_values = TimeSeries.from_group_dataframe(
             self.df_test,
             group_cols="series_id",
             time_col="time_idx",
             value_cols=self.feature_cols,
         )
-        train_series, test_series = train_test_split(dataset, test_size=1 - train_split, lazy=False)
 
-        labels = TimeSeries.from_group_dataframe(
+        # Labels de treino: df_train não tem coluna target (dados não rotulados),
+        # então criamos uma dummy com zeros (assunção: treino é todo normal)
+        df_train_with_target = self.df_train.copy()
+        df_train_with_target["target"] = 0
+        train_labels = TimeSeries.from_group_dataframe(
+            df_train_with_target,
+            group_cols="series_id",
+            time_col="time_idx",
+            value_cols="target",
+        )
+
+        # Labels de teste vêm do df_test (que tem a coluna target)
+        test_labels = TimeSeries.from_group_dataframe(
             self.df_test,
             group_cols="series_id",
             time_col="time_idx",
             value_cols="target",
         )
 
-        train_labels, test_labels = train_test_split(labels, test_size=1 - train_split, lazy=False)
-        return (train_series, test_series, train_labels, test_labels)  # pyright: ignore[reportReturnType]
+        return (train_values, test_values, train_labels, test_labels)  # pyright: ignore[reportReturnType]
 
     # ------------------------------------------------------------------
     # TimeSeriesDataSet builders
