@@ -82,6 +82,8 @@ class HyperparamOptim:
         self.model_count = 0
         self.callbacks = callbacks
 
+        self.callbacks.extend([pruning_callback, early_stop])
+
     # ------------------------------------------------------------------
     # API pública
     # ------------------------------------------------------------------
@@ -129,13 +131,17 @@ class HyperparamOptim:
         # 4. Prepara callbacks: EarlyStopping + pruning
         pruning_callback = PyTorchLightningPruningCallback(trial, monitor="val_loss")
         early_stop = EarlyStopping(monitor="val_loss", patience=self.patience)
-        self.callbacks.extend([pruning_callback, early_stop])
+        callbacks = [
+            *self.callbacks,
+            pruning_callback,
+            early_stop,
+        ]
 
         # 5. Monta o wrapper
         wrapper = OutlierModelWrapper(
             model_dict=model_dict,
             max_epochs=self.max_epochs,
-            trainer_callbacks=self.callbacks,
+            trainer_callbacks=callbacks,
             enable_progress_bar=False,
             enable_model_summary=False,
             **self.fixed_params,
