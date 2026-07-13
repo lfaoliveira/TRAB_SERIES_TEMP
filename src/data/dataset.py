@@ -79,7 +79,7 @@ class NasaDataset:
 
         # Convert to long format -----------------------------------------------
         self.df_test, self.tam_dataset = self.multi_to_df(test_wide, include_labels=True, drop=True)
-        self.df_train = self.multi_to_df(train_wide, include_labels=False, drop=True)
+        self.df_train, _ = self.multi_to_df(train_wide, include_labels=False, drop=True)
         if prototype:
             self.df_test[:10_000].to_csv(export_path / "./test.csv")
 
