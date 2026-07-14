@@ -7,7 +7,12 @@ import torch.nn.functional as F
 from lightning import LightningModule
 from pytorch_tcn import TCN
 
-from src.pipelines.metrics import CentralMetricsStore, build_test_metrics, build_vaL_class_metrics, build_validation_metrics
+from src.pipelines.metrics import (
+    CentralMetricsStore,
+    build_test_metrics,
+    build_vaL_class_metrics,
+    build_validation_metrics,
+)
 from src.models.nn.base_model import validation_step_reconstruction
 
 
@@ -44,6 +49,7 @@ class TCN_train(LightningModule):
         lr: float = 1e-3,
         weight_decay: float = 1e-5,
         threshold: float = 0.99,
+        dropout=0.2,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -64,7 +70,7 @@ class TCN_train(LightningModule):
             kernel_size=5,
             dilations=None,  # DILATACAO PADRAO exponencial
             dilation_reset=32,  # reseta dilatacao
-            dropout=0.0,
+            dropout=dropout,
             causal=True,  # ignora informacoes futuras
             use_norm=use_norm,
             kernel_initializer="xavier_uniform",
@@ -151,7 +157,7 @@ class TCN_train(LightningModule):
         # self.val_metrics.update(recon, x)
 
         return recon_loss
-    
+
     def on_validation_epoch_end(self):
         metrics = self.val_metrics.compute()
         self.log_dict(metrics)
@@ -174,7 +180,6 @@ class TCN_train(LightningModule):
         self.log("test_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.test_recon_metrics.update(recon, x)
         return loss
-
 
     def on_test_epoch_end(self):
         metrics = self.test_recon_metrics.compute()
