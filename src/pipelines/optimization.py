@@ -88,14 +88,14 @@ class HyperparamOptim:
     # API pública
     # ------------------------------------------------------------------
 
-    def optimize(self) -> optuna.Study:
+    def optimize(self, timeout=14400) -> optuna.Study:
         """Roda o estudo Optuna e printa o melhor trial."""
         study: optuna.Study = optuna.create_study(
             direction=self.direction,
             pruner=optuna.pruners.PercentilePruner(25.0),
             study_name=self.study_name,
         )
-        study.optimize(self.objective, n_trials=self.n_trials)
+        study.optimize(self.objective, n_trials=self.n_trials, timeout=timeout)
 
         logging.info("\n" + "=" * 50)
         logging.info("  MELHOR TRIAL")
