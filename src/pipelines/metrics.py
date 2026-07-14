@@ -218,6 +218,15 @@ def build_validation_metrics() -> MetricCollection:
         }
     )
 
+def build_vaL_class_metrics() -> MetricCollection:
+    return MetricCollection(
+        {
+            "f1": FBetaScore(task="binary", beta=1.0),
+            "precision": Precision(task="binary"),
+            "recall": Recall(task="binary"),
+        }
+    )
+
 
 def build_test_metrics() -> MetricCollection:
     return MetricCollection(

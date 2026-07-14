@@ -2,7 +2,12 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from lightning import LightningModule
-from src.pipelines.metrics import CentralMetricsStore, build_test_metrics, build_validation_metrics
+from src.pipelines.metrics import (
+    CentralMetricsStore,
+    build_test_metrics,
+    build_vaL_class_metrics,
+    build_validation_metrics,
+)
 from src.models.nn.base_model import validation_step_reconstruction
 
 
@@ -59,7 +64,7 @@ class VAE(LightningModule):
         self.val_metrics = build_validation_metrics()
         self.test_metrics = build_test_metrics()
         self.test_recon_metrics = build_validation_metrics()
-        self.val_class_metrics = build_test_metrics()
+        self.val_class_metrics = build_vaL_class_metrics()
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         h = self.encoder(x)
