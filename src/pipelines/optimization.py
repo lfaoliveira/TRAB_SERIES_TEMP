@@ -127,12 +127,10 @@ class HyperparamOptim:
         model_dict = self.model_factory(params)
 
         # 4. Prepara callbacks: EarlyStopping + pruning
-        pruning_callback = PyTorchLightningPruningCallback(trial, monitor="val_loss")
-        early_stop = EarlyStopping(monitor="val_loss", patience=self.patience)
+        pruning_callback = PyTorchLightningPruningCallback(trial, monitor="val_f1")
         callbacks = [
             *self.callbacks,
             pruning_callback,
-            early_stop,
         ]
 
         # 5. Monta o wrapper
