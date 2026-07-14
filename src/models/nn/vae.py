@@ -148,7 +148,7 @@ class VAE(LightningModule):
         class_metrics = self.val_class_metrics.compute()
         prefixed = {f"val_{k}": v for k, v in class_metrics.items()}
         self.log_dict(prefixed)
-        CentralMetricsStore.add(self.__class__.__name__, "validation", prefixed)
+        CentralMetricsStore.add(self.__class__.__name__, "validation", class_metrics)
         self.val_class_metrics.reset()
 
         self.heartbeat += 1
