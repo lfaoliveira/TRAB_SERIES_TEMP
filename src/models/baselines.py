@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-import logging
+from typing import cast
 
 import numpy as np
 import torch
@@ -11,6 +11,7 @@ import sklearn.neighbors
 from src.data.utils import extract_windows
 from src.models.outlier import OutlierDetector
 from src.pipelines.metrics import (
+    CentralMetricsStore,
     DetectionSummaryMap,
     ScoreSeriesMap,
     calculate_detection_summary,
@@ -76,7 +77,14 @@ class KMeans(OutlierDetector):
             score_vals = score_ts.values(copy=False).flatten()
             n_warmup = len(labels) - len(score_vals)
             aligned.append(TimeSeries.from_values(labels[n_warmup:]))
-        return calculate_detection_summary(aligned, scores, torch.device("cpu"))
+        result = calculate_detection_summary(aligned, scores, torch.device("cpu"))
+        for name, met in result.items():
+            CentralMetricsStore.add(
+                name,
+                "test",
+                cast(dict, {k: v for k, v in met.items() if k != "name"}),
+            )
+        return result
 
 
 class Hampel(OutlierDetector):
@@ -127,7 +135,14 @@ class Hampel(OutlierDetector):
         return {self.__class__.__name__: scores}
 
     def metrics(self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap) -> DetectionSummaryMap:
-        return calculate_detection_summary(test_labels, scores, torch.device("cpu"))
+        result = calculate_detection_summary(test_labels, scores, torch.device("cpu"))
+        for name, met in result.items():
+            CentralMetricsStore.add(
+                name,
+                "test",
+                cast(dict, {k: v for k, v in met.items() if k != "name"}),
+            )
+        return result
 
 
 class LocalOutlierFactor(OutlierDetector):
@@ -203,7 +218,14 @@ class LocalOutlierFactor(OutlierDetector):
         return {self.__class__.__name__: scores}
 
     def metrics(self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap) -> DetectionSummaryMap:
-        return calculate_detection_summary(test_labels, scores, torch.device("cpu"))
+        result = calculate_detection_summary(test_labels, scores, torch.device("cpu"))
+        for name, met in result.items():
+            CentralMetricsStore.add(
+                name,
+                "test",
+                cast(dict, {k: v for k, v in met.items() if k != "name"}),
+            )
+        return result
 
 
 class IsolationForest(OutlierDetector):
@@ -278,4 +300,11 @@ class IsolationForest(OutlierDetector):
         return {self.__class__.__name__: scores}
 
     def metrics(self, test_labels: Sequence[TimeSeries], scores: ScoreSeriesMap) -> DetectionSummaryMap:
-        return calculate_detection_summary(test_labels, scores, torch.device("cpu"))
+        result = calculate_detection_summary(test_labels, scores, torch.device("cpu"))
+        for name, met in result.items():
+            CentralMetricsStore.add(
+                name,
+                "test",
+                cast(dict, {k: v for k, v in met.items() if k != "name"}),
+            )
+        return result
