@@ -9,4 +9,4 @@ dataset:
 hiperparams:
 
   tcn: {'lr': 1e-4,  'num_channels_0': 64, 'num_channels_1': 64, 'num_channels_2': 176, 'num_channels_3': 176, 'window_size': 32}
-  vae: {'lr': 2.2e-3, 'hidden_dim': 820, 'latent_dim': 690, 'window_size': 14}
+  vae: {'lr': 6e-5, 'hidden_dim': 860, 'latent_dim': 780, 'window_size': 32, 'weight_decay': 9.96e-06}
