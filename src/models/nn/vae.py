@@ -1,10 +1,9 @@
-import logging
-
 import torch
 from torch import nn
 import torch.nn.functional as F
 from lightning import LightningModule
 from src.pipelines.metrics import CentralMetricsStore, build_test_metrics, build_validation_metrics
+from src.models.nn.base_model import validation_step_reconstruction
 
 
 class VAE(LightningModule):
@@ -25,6 +24,7 @@ class VAE(LightningModule):
         latent_dim: int = 256,
         lr: float = 1e-3,
         weight_decay: float = 1e-5,
+        threshold: float = 0.99,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -32,6 +32,7 @@ class VAE(LightningModule):
         self.lr = lr
         self.heartbeat = 0
         self.weight_decay = weight_decay
+        self.threshold = threshold
 
         # Encoder
 
@@ -58,6 +59,7 @@ class VAE(LightningModule):
         self.val_metrics = build_validation_metrics()
         self.test_metrics = build_test_metrics()
         self.test_recon_metrics = build_validation_metrics()
+        self.val_class_metrics = build_test_metrics()
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         h = self.encoder(x)
@@ -104,18 +106,14 @@ class VAE(LightningModule):
     def validation_step(self, batch, batch_idx):
         x, y = batch
         mu, logvar = self.encode(x)
-        z = self.reparameterize(mu, logvar)
-        x_recon = self.decode(z)
 
-        recon_loss = F.mse_loss(x_recon, x, reduction="sum")
         kl = self.kl_formula(logvar, mu)
+        recon_loss = validation_step_reconstruction(self, batch, self.threshold)
         loss = recon_loss + kl
 
-        self.log("val_loss", loss, prog_bar=True)
         self.log("val_recon_loss", recon_loss, prog_bar=False)
         self.log("val_kl_loss", kl, prog_bar=False)
 
-        self.val_metrics.update(x_recon, x)
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -140,6 +138,13 @@ class VAE(LightningModule):
         self.log_dict(metrics)
         CentralMetricsStore.add(self.__class__.__name__, "validation", metrics)
         self.val_metrics.reset()
+
+        # Métricas de classificação da validação
+        class_metrics = self.val_class_metrics.compute()
+        prefixed = {f"val_{k}": v for k, v in class_metrics.items()}
+        self.log_dict(prefixed)
+        CentralMetricsStore.add(self.__class__.__name__, "validation", prefixed)
+        self.val_class_metrics.reset()
 
         self.heartbeat += 1
 

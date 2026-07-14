@@ -1,4 +1,3 @@
-import logging
 import math
 from typing import Literal
 
@@ -9,6 +8,7 @@ from lightning import LightningModule
 from pytorch_tcn import TCN
 
 from src.pipelines.metrics import CentralMetricsStore, build_test_metrics, build_validation_metrics
+from src.models.nn.base_model import validation_step_reconstruction
 
 
 class PositionalEncoding(nn.Module):
@@ -43,11 +43,13 @@ class TCN_train(LightningModule):
         use_norm: Literal["weight_norm", "batch_norm"] = "weight_norm",
         lr: float = 1e-3,
         weight_decay: float = 1e-5,
+        threshold: float = 0.99,
     ):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
         self.weight_decay = weight_decay
+        self.threshold = threshold
 
         if not num_channels:
             num_channels = [1, 64, 64, 128, 256, 512]
@@ -93,6 +95,7 @@ class TCN_train(LightningModule):
         self.val_metrics = build_validation_metrics()
         self.test_metrics = build_test_metrics()
         self.test_recon_metrics = build_validation_metrics()
+        self.val_class_metrics = build_test_metrics()
 
         self.heartbeat = 0
 
@@ -140,15 +143,29 @@ class TCN_train(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx) -> torch.Tensor:
-        x, y = batch
-        recon = self(x)
-        loss = F.mse_loss(recon, x)
+
+        recon_loss = validation_step_reconstruction(self, batch, self.threshold)
 
         # tenta reconstruir 'x'
-        self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        self.val_metrics.update(recon, x)
+        # self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        # self.val_metrics.update(recon, x)
 
-        return loss
+        return recon_loss
+    
+    def on_validation_epoch_end(self):
+        metrics = self.val_metrics.compute()
+        self.log_dict(metrics)
+        CentralMetricsStore.add(self.__class__.__name__, "validation", metrics)
+        self.val_metrics.reset()
+
+        # Métricas de classificação da validação
+        class_metrics = self.val_class_metrics.compute()
+        prefixed = {f"val_{k}": v for k, v in class_metrics.items()}
+        self.log_dict(prefixed)
+        CentralMetricsStore.add(self.__class__.__name__, "validation", prefixed)
+        self.val_class_metrics.reset()
+
+        self.heartbeat += 1
 
     def test_step(self, batch, batch_idx) -> torch.Tensor:
         x, y = batch
@@ -158,13 +175,6 @@ class TCN_train(LightningModule):
         self.test_recon_metrics.update(recon, x)
         return loss
 
-    def on_validation_epoch_end(self):
-        metrics = self.val_metrics.compute()
-        self.log_dict(metrics)
-        CentralMetricsStore.add(self.__class__.__name__, "validation", metrics)
-        self.val_metrics.reset()
-
-        self.heartbeat += 1
 
     def on_test_epoch_end(self):
         metrics = self.test_recon_metrics.compute()

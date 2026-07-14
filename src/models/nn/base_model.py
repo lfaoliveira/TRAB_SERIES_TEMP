@@ -1,7 +1,8 @@
 import gc
 import logging
 from collections.abc import Sequence
-from typing import Optional, cast
+import traceback
+from typing import cast
 
 import numpy as np
 import torch
@@ -22,6 +23,62 @@ from src.pipelines.metrics import (
 )
 from src.data.dataset import SlidingWindowDataset
 from lightning.pytorch.callbacks import Callback
+
+
+def validation_step_reconstruction(
+    model: LightningModule,
+    batch: tuple[torch.Tensor, torch.Tensor],
+    threshold: float = 0.99,
+) -> torch.Tensor:
+    """Utility validation_step para modelos de detecção de anomalias baseados em reconstrução.
+
+    Computa:
+    - Reconstruction loss (MSE) entre entrada e reconstrução
+    - Métricas de reconstrução (MSE, SMAPE, MAE) em ``model.val_metrics``
+    - Métricas de classificação binária (F1, Precision, Recall, CM) em
+      ``model.val_class_metrics``, derivadas do erro por janela versus
+      ``threshold * max(MSE)``
+
+    O ``y`` do batch (rótulo do último ponto de cada janela) é usado como
+    ground truth para classificação.
+
+    Parâmetros
+    ----------
+    model : LightningModule
+        Modelo que implementa ``forward(x) -> recon``.
+    batch : tuple[torch.Tensor, torch.Tensor]
+        Tupla ``(x, y)`` onde ``x`` é a janela de entrada e ``y`` o rótulo.
+    threshold : float
+        Fração do maior MSE usada como limiar de anomalia.
+
+    Retorna
+    -------
+    torch.Tensor
+        Loss escalar de reconstrução (MSE).
+    """
+    x, y = batch
+    recon = model(x)
+    loss = F.mse_loss(recon, x)
+
+    # Erro por amostra (janela) → predição binária de anomalia
+    mse_per_sample = F.mse_loss(recon, x, reduction="none").mean(dim=1)
+    max_mse = mse_per_sample.max()
+    limiar = threshold * max_mse if max_mse > 0 else 0.0
+    preds = (mse_per_sample > limiar).to(torch.int)
+
+    model.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+
+    # Métricas de reconstrução
+    val_metrics = getattr(model, "val_metrics", None)
+    if val_metrics is not None:
+        val_metrics.update(recon, x)
+
+    # Métricas de classificação (F1, Precision, Recall, CM)
+    val_class_metrics = getattr(model, "val_class_metrics", None)
+    if val_class_metrics is not None:
+        val_class_metrics.update(preds, y)
+
+    return loss
 
 
 class OutlierModelWrapper(OutlierDetector):
@@ -138,21 +195,24 @@ class OutlierModelWrapper(OutlierDetector):
             enable_model_summary=self._enable_model_summary,
             callbacks=self.trainer_callbacks,
         )
+        try:
+            assert self.model_dict is not None
+            for name, model in self.model_dict.items():
+                if model is None:
+                    logging.info(f"PL MODEL NULO — chave '{name}' — pulando fit")
+                    continue
 
-        assert self.model_dict is not None
-        for name, model in self.model_dict.items():
-            if model is None:
-                logging.info(f"PL MODEL NULO — chave '{name}' — pulando fit")
-                continue
+                logging.info(f"Treinando modelo '{name}' …")
 
-            logging.info(f"Treinando modelo '{name}' …")
+                self.trainer.fit(model, train_dataloaders=self.train_loader, val_dataloaders=self.val_loader)
+                gc.collect()
+                torch.cuda.empty_cache()
 
-            self.trainer.fit(model, train_dataloaders=self.train_loader, val_dataloaders=self.val_loader)
-            gc.collect()
-            torch.cuda.empty_cache()
-
-            if self.hyper_optim:
-                break
+                if self.hyper_optim:
+                    break
+        except:
+            traceback.print_exc()
+            raise
 
     def test_scorer(self, test: list[TimeSeries]) -> ScoreSeriesMap:
         """
