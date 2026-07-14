@@ -63,6 +63,7 @@ class HyperparamOptim:
         fixed_params: dict[str, Any] | None = None,
         max_epochs: int = 50,
         patience: int = 10,
+        batch_size: int = 512,
         n_trials: int = 30,
         direction: str = "maximize",
         study_name: str | None = None,
@@ -81,6 +82,7 @@ class HyperparamOptim:
 
         self.model_count = 0
         self.callbacks = callbacks
+        self.batch_size = batch_size
 
     # ------------------------------------------------------------------
     # API pública
@@ -136,6 +138,7 @@ class HyperparamOptim:
         # 5. Monta o wrapper
         wrapper = OutlierModelWrapper(
             model_dict=model_dict,
+            batch_size=self.batch_size,
             max_epochs=self.max_epochs,
             trainer_callbacks=callbacks,
             enable_progress_bar=False,

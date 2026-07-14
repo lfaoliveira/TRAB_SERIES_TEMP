@@ -23,6 +23,7 @@ from src.pipelines.metrics import (
 )
 from src.data.dataset import SlidingWindowDataset
 from lightning.pytorch.callbacks import Callback
+from src.models.nn import TCN_train, VAE
 
 
 def validation_step_reconstruction(
@@ -100,7 +101,7 @@ class OutlierModelWrapper(OutlierDetector):
 
     def __init__(
         self,
-        model_dict: dict[str, LightningModule],
+        model_dict: dict[str, TCN_train | VAE],
         dev=False,
         window_size: int = 20,
         lr: float = 1e-3,
@@ -203,6 +204,9 @@ class OutlierModelWrapper(OutlierDetector):
                     continue
 
                 logging.info(f"Treinando modelo '{name}' …")
+
+                # Propaga threshold do wrapper para o modelo
+                model.threshold = self.threshold
 
                 self.trainer.fit(model, train_dataloaders=self.train_loader, val_dataloaders=self.val_loader)
                 gc.collect()
