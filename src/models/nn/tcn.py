@@ -1,4 +1,5 @@
 import logging
+import math
 from typing import Literal
 
 import torch
@@ -8,6 +9,24 @@ from lightning import LightningModule
 from pytorch_tcn import TCN
 
 from src.pipelines.metrics import CentralMetricsStore, build_test_metrics, build_validation_metrics
+
+
+class PositionalEncoding(nn.Module):
+    """Sinusoidal positional encoding — "Attention Is All You Need" (Vaswani et al., 2017)."""
+
+    def __init__(self, d_model: int, max_len: int = 5000):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)  # (1, max_len, d_model)
+        self.register_buffer("pe", pe)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (batch, seq_len, d_model)
+        return x + self.pe[:, : x.size(1), :]
 
 
 class TCN_train(LightningModule):
@@ -23,10 +42,12 @@ class TCN_train(LightningModule):
         num_channels: list[int] = [],
         use_norm: Literal["weight_norm", "batch_norm"] = "weight_norm",
         lr: float = 1e-3,
+        weight_decay: float = 1e-5,
     ):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
+        self.weight_decay = weight_decay
 
         if not num_channels:
             num_channels = [1, 64, 64, 128, 256, 512]
@@ -52,14 +73,22 @@ class TCN_train(LightningModule):
             output_activation=None,  # APENAS RECONSTRUCAO, SEM CLASSIFICACAO DIRETA
         )
 
+        self.pos_encoder = PositionalEncoding(d_model=out_channels_tcn, max_len=window_size)
+
         self.attn = nn.MultiheadAttention(
             embed_dim=out_channels_tcn, num_heads=4, batch_first=True
         )  # formato esperado: (batch, seq_len ou window_size, embed_dim)
 
         self.attn_norm = nn.LayerNorm(out_channels_tcn)
 
-        # --- Cabeça de previsão ---
-        self.head = nn.Linear(out_channels_tcn, HORIZON)
+        # --- Cabeça de previsão (decoder convolucional) ---
+        # ConvTranspose1d: (batch, d_model, 1) -> (batch, 1, window)
+        self.head = nn.ConvTranspose1d(
+            in_channels=out_channels_tcn,
+            out_channels=1,
+            kernel_size=HORIZON,
+            stride=HORIZON,
+        )
 
         self.val_metrics = build_validation_metrics()
         self.test_metrics = build_test_metrics()
@@ -72,6 +101,10 @@ class TCN_train(LightningModule):
         x = x.unsqueeze(1)  # (batch, 1, window)
         tcn_out: torch.Tensor = self.tcn(x)  # retorno: (batch, num_channels[-1], window)
         tcn_out = tcn_out.transpose(1, 2)  # (batch, window, channel)
+
+        # --- Positional Encoding ---
+        tcn_out = self.pos_encoder(tcn_out)
+
         seq_len = tcn_out.size(1)
         # Criar na CPU primeiro e mover usando .to() evita deadlocks de sincronização em containers instáveis
         causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool), diagonal=1).to(x.device)
@@ -91,9 +124,11 @@ class TCN_train(LightningModule):
         # Conexão residual + normalização (padrão tipo Transformer)
         out = self.attn_norm(tcn_out + attn_out)
 
-        # Usa o último timestep para prever o horizonte futuro
+        # Usa o último timestep para decodificar o horizonte completo
         last_step = out[:, -1, :]  # (batch, d_model)
-        recon = self.head(last_step)  # (batch, forecast_horizon)
+        last_step = last_step.unsqueeze(-1)  # (batch, d_model, 1)
+        recon = self.head(last_step)  # (batch, 1, window)
+        recon = recon.squeeze(1)  # (batch, window)
 
         return recon  # (batch, window)
 
@@ -138,4 +173,4 @@ class TCN_train(LightningModule):
         self.test_recon_metrics.reset()
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr)
+        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
