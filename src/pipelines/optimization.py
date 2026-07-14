@@ -82,8 +82,6 @@ class HyperparamOptim:
         self.model_count = 0
         self.callbacks = callbacks
 
-        self.callbacks.extend([pruning_callback, early_stop])
-
     # ------------------------------------------------------------------
     # API pública
     # ------------------------------------------------------------------
