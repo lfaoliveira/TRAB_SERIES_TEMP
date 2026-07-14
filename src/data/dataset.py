@@ -530,6 +530,6 @@ class SlidingWindowDataset(Dataset):
                 out=np.zeros(orig_len, dtype=float),
                 where=total_votes > 0,
             )
-            scores.append((vote_ratio > 0.5).astype(int))
+            scores.append((vote_ratio > 0).astype(int))
 
         return scores
