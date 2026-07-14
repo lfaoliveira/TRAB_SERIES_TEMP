@@ -24,12 +24,14 @@ class VAE(LightningModule):
         hidden_dim: int = 512,
         latent_dim: int = 256,
         lr: float = 1e-3,
+        weight_decay: float = 1e-5,
     ):
         super().__init__()
         self.save_hyperparameters()
 
         self.lr = lr
         self.heartbeat = 0
+        self.weight_decay = weight_decay
 
         # Encoder
 
@@ -148,4 +150,4 @@ class VAE(LightningModule):
         self.test_recon_metrics.reset()
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
-        return torch.optim.Adam(self.parameters(), lr=self.lr)
+        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
