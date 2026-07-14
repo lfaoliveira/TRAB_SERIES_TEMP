@@ -6,8 +6,8 @@ from abc import ABC, abstractmethod
 from darts import TimeSeries
 from lightning import LightningModule
 
-from src.models.nn.tcn import TCN_train
-from src.models.nn.vae import VAE
+from src.models.nn import TCN_train
+from src.models.nn import VAE
 from src.pipelines.metrics import (
     DetectionSummaryMap,
     ScoreSeriesMap,
